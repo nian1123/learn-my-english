@@ -37,6 +37,44 @@ const NON_TERMINAL_ABBREVIATIONS = new Set([
   "st.",
   "vs.",
 ]);
+const ALWAYS_NON_TERMINAL_ABBREVIATIONS = new Set(["e.g.", "i.e.", "vs."]);
+const COMMON_SENTENCE_STARTERS = new Set([
+  "a",
+  "after",
+  "also",
+  "an",
+  "and",
+  "before",
+  "but",
+  "finally",
+  "he",
+  "here",
+  "however",
+  "i",
+  "it",
+  "meanwhile",
+  "next",
+  "now",
+  "she",
+  "so",
+  "still",
+  "that",
+  "the",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "we",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "yet",
+  "you",
+]);
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -91,11 +129,21 @@ function isNonTerminalAbbreviation(text: string, periodIndex: number): boolean {
     .match(/([A-Za-z][A-Za-z.]*)\.$/)?.[0];
   if (!token) return false;
 
-  return (
-    NON_TERMINAL_ABBREVIATIONS.has(token.toLowerCase()) ||
+  const abbreviation = token.toLowerCase();
+  const protectedToken =
+    NON_TERMINAL_ABBREVIATIONS.has(abbreviation) ||
     /^[A-Z]\.$/.test(token) ||
-    /^(?:[A-Za-z]\.){2,}$/.test(token)
-  );
+    /^(?:[A-Za-z]\.){2,}$/.test(token);
+  if (!protectedToken) return false;
+  if (ALWAYS_NON_TERMINAL_ABBREVIATIONS.has(abbreviation)) return true;
+
+  const followingWord = text
+    .slice(periodIndex + 1)
+    .match(/^["'”’“‘()\[\]}\s]*([A-Za-z]+)/)?.[1];
+  if (!followingWord) return false;
+  if (followingWord[0] === followingWord[0]?.toLowerCase()) return true;
+
+  return !COMMON_SENTENCE_STARTERS.has(followingWord.toLowerCase());
 }
 
 function splitCueText(text: string): CueTextFragment[] {

@@ -196,6 +196,15 @@ One cue can contain a sentence. It can contain another one!
 
 00:00:18.000 --> 00:00:20.000
 Dr. Smith spoke.
+
+00:00:22.000 --> 00:00:24.000
+I live in the U.S. It is large.
+
+00:00:26.000 --> 00:00:28.000
+We reached Main St. Then we left.
+
+00:00:30.000 --> 00:00:32.000
+The U.S. Government spoke.
 `;
 
   await installYouTubePlayerBoundary(page, { duration: 74 });
@@ -209,7 +218,14 @@ Dr. Smith spoke.
   await expect(page.getByText("One cue can contain a sentence.")).toBeVisible();
   await expect(page.getByText("It can contain another one!")).toBeVisible();
   await expect(page.getByText("Dr. Smith spoke.", { exact: true })).toBeVisible();
-  await expect(page.getByText("5 句")).toBeVisible();
+  await expect(page.getByText("I live in the U.S.", { exact: true })).toBeVisible();
+  await expect(page.getByText("It is large.", { exact: true })).toBeVisible();
+  await expect(page.getByText("We reached Main St.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Then we left.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("The U.S. Government spoke.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("10 句")).toBeVisible();
 
   await page.getByRole("button", { name: "播放第 3 句" }).click();
   await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(15));
