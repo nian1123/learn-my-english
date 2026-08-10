@@ -1,5 +1,41 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const externalProviderEnvironment = {
+  YT_DLP_PATH: "./tests/fixtures/yt-dlp",
+  DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
+};
+
+const configuredAiEnvironment = {
+  OPENAI_BASE_URL: "http://127.0.0.1:51448/v1",
+  OPENAI_API_KEY: "e2e-local-secret",
+  OPENAI_MODEL: "e2e-local-model",
+  DEEPSEEK_BASE_URL: "https://api.deepseek.example",
+  DEEPSEEK_API_KEY: "e2e-deepseek-secret",
+  DEEPSEEK_MODEL: "e2e-deepseek-model",
+};
+
+const unconfiguredAiEnvironment = {
+  OPENAI_BASE_URL: "",
+  OPENAI_API_KEY: "",
+  OPENAI_MODEL: "",
+  DEEPSEEK_BASE_URL: "",
+  DEEPSEEK_API_KEY: "",
+  DEEPSEEK_MODEL: "",
+};
+
+function applicationServer(
+  port: number,
+  aiEnvironment: Record<string, string>,
+) {
+  return {
+    command: `npm run start -- --hostname 127.0.0.1 --port ${port}`,
+    env: { ...externalProviderEnvironment, ...aiEnvironment },
+    url: `http://127.0.0.1:${port}`,
+    reuseExistingServer: false,
+    timeout: 30_000,
+  };
+}
+
 export default defineConfig({
   testDir: "./tests/e2e",
   outputDir: "./test-results",
@@ -25,37 +61,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 10_000,
     },
-    {
-      command: "npm run start -- --hostname 127.0.0.1 --port 3100",
-      env: {
-        YT_DLP_PATH: "./tests/fixtures/yt-dlp",
-        DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
-        OPENAI_BASE_URL: "http://127.0.0.1:51448/v1",
-        OPENAI_API_KEY: "e2e-local-secret",
-        OPENAI_MODEL: "e2e-local-model",
-        DEEPSEEK_BASE_URL: "https://api.deepseek.example",
-        DEEPSEEK_API_KEY: "e2e-deepseek-secret",
-        DEEPSEEK_MODEL: "e2e-deepseek-model",
-      },
-      url: "http://127.0.0.1:3100",
-      reuseExistingServer: false,
-      timeout: 30_000,
-    },
-    {
-      command: "npm run start -- --hostname 127.0.0.1 --port 3101",
-      env: {
-        YT_DLP_PATH: "./tests/fixtures/yt-dlp",
-        DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
-        OPENAI_BASE_URL: "",
-        OPENAI_API_KEY: "",
-        OPENAI_MODEL: "",
-        DEEPSEEK_BASE_URL: "",
-        DEEPSEEK_API_KEY: "",
-        DEEPSEEK_MODEL: "",
-      },
-      url: "http://127.0.0.1:3101",
-      reuseExistingServer: false,
-      timeout: 30_000,
-    },
+    applicationServer(3100, configuredAiEnvironment),
+    applicationServer(3101, unconfiguredAiEnvironment),
   ],
 });

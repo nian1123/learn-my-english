@@ -1,8 +1,6 @@
-import {
-  ImportEntry,
-  PersistenceAlert,
-  SettingsAndDiagnostics,
-} from "./study-library-client";
+import { ImportEntry } from "./import-entry";
+import { PersistenceAlert } from "./persistence-alert";
+import { SettingsAndDiagnostics } from "./settings-and-diagnostics";
 
 function LibraryMark() {
   return (

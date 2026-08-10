@@ -32,7 +32,7 @@ DEEPSEEK_MODEL=
 
 ## 字幕获取边界
 
-Study Video 始终通过 YouTube 官方嵌入播放器播放，应用不会下载或托管视频、音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是由学习者提供 `.vtt` 或 `.srt` 字幕文件。
+Study Video 始终通过 YouTube 官方嵌入播放器播放，应用不会下载或托管视频、音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。
 
 ## 验证
 

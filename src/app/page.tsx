@@ -1,5 +1,5 @@
 import { StudyLibraryApp } from "./study-library-app";
-import { StudyLibraryClientProvider } from "./study-library-client";
+import { StudyLibraryClientProvider } from "./study-library-client-context";
 
 export default function HomePage() {
   return (

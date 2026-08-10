@@ -1,25 +1,15 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useState } from "react";
 
-import {
-  DEFAULT_LEARNER_PREFERENCES,
-  readLearnerPreferences,
-  writeLearnerPreferences,
-  type LearnerPreferences,
-} from "@/client/learner-preferences";
 import type {
   RuntimeCapability,
   RuntimeDiagnostic,
   RuntimeDiagnosticsResponse,
   RuntimeStatus,
 } from "@/domain/runtime-diagnostics";
+
+import { useStudyLibraryClient } from "./study-library-client-context";
 
 const CAPABILITIES: ReadonlyArray<{
   capability: RuntimeCapability | "indexed-db";
@@ -61,148 +51,8 @@ const STATUS_COPY: Record<RuntimeStatus | "checking", string> = {
   checking: "检查中",
 };
 
-type PersistenceStatus = "checking" | "available" | "unavailable";
-type PreferenceStatus = "loading" | "idle" | "saving" | "saved" | "error";
-
-type StudyLibraryClientState = {
-  closeDiagnostics: () => void;
-  openDiagnostics: () => void;
-  persistenceStatus: PersistenceStatus;
-  preferences: LearnerPreferences;
-  preferenceStatus: PreferenceStatus;
-  setHideTranscriptByDefault: (checked: boolean) => Promise<void>;
-  showDiagnostics: boolean;
-};
-
-const StudyLibraryClientContext = createContext<StudyLibraryClientState | null>(
-  null,
-);
-
-function useStudyLibraryClient(): StudyLibraryClientState {
-  const context = useContext(StudyLibraryClientContext);
-
-  if (!context) {
-    throw new Error(
-      "Study Library client controls require StudyLibraryClientProvider",
-    );
-  }
-
-  return context;
-}
-
-export function StudyLibraryClientProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [persistenceStatus, setPersistenceStatus] =
-    useState<PersistenceStatus>("checking");
-  const [preferences, setPreferences] = useState<LearnerPreferences>(
-    DEFAULT_LEARNER_PREFERENCES,
-  );
-  const [preferenceStatus, setPreferenceStatus] =
-    useState<PreferenceStatus>("loading");
-
-  useEffect(() => {
-    let active = true;
-
-    readLearnerPreferences()
-      .then((storedPreferences) => {
-        if (!active) return;
-        setPreferences(storedPreferences);
-        setPersistenceStatus("available");
-        setPreferenceStatus("idle");
-      })
-      .catch(() => {
-        if (!active) return;
-        setPersistenceStatus("unavailable");
-        setPreferenceStatus("error");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const setHideTranscriptByDefault = async (checked: boolean) => {
-    const nextPreferences = {
-      ...preferences,
-      hideTranscriptByDefault: checked,
-    };
-
-    setPreferences(nextPreferences);
-    setPreferenceStatus("saving");
-
-    try {
-      await writeLearnerPreferences(nextPreferences);
-      setPersistenceStatus("available");
-      setPreferenceStatus("saved");
-    } catch {
-      setPersistenceStatus("unavailable");
-      setPreferenceStatus("error");
-    }
-  };
-
-  return (
-    <StudyLibraryClientContext.Provider
-      value={{
-        closeDiagnostics: () => setShowDiagnostics(false),
-        openDiagnostics: () => setShowDiagnostics(true),
-        persistenceStatus,
-        preferences,
-        preferenceStatus,
-        setHideTranscriptByDefault,
-        showDiagnostics,
-      }}
-    >
-      {children}
-    </StudyLibraryClientContext.Provider>
-  );
-}
-
-export function PersistenceAlert() {
-  const { persistenceStatus } = useStudyLibraryClient();
-
-  if (persistenceStatus !== "unavailable") return null;
-
-  return (
-    <div className="blocking-alert" role="alert">
-      <strong>本地数据不可用，暂时不能保存学习内容</strong>
-      <span>请检查 Chrome 的网站数据权限，然后刷新页面重试。</span>
-    </div>
-  );
-}
-
-export function ImportEntry() {
-  const { persistenceStatus } = useStudyLibraryClient();
-
-  return (
-    <form className="import-card" onSubmit={(event) => event.preventDefault()}>
-      <label htmlFor="youtube-url">YouTube 视频链接</label>
-      <div className="import-row">
-        <input
-          disabled={persistenceStatus === "unavailable"}
-          id="youtube-url"
-          name="youtube-url"
-          placeholder="https://www.youtube.com/watch?v=..."
-          type="url"
-        />
-        <button disabled type="submit">
-          导入视频
-        </button>
-      </div>
-      <p>
-        自动字幕依赖非官方的 yt-dlp，可能失效；导入开放后可改用自己的 .vtt 或
-        .srt 字幕。
-      </p>
-    </form>
-  );
-}
-
-function DiagnosticsPanel() {
+function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   const {
-    closeDiagnostics,
     persistenceStatus,
     preferences,
     preferenceStatus,
@@ -257,11 +107,7 @@ function DiagnosticsPanel() {
             <h2 id="diagnostics-title">运行状态</h2>
             <p>这里只显示连接状态，密钥始终留在本地服务中。</p>
           </div>
-          <button
-            className="icon-button"
-            onClick={closeDiagnostics}
-            type="button"
-          >
+          <button className="icon-button" onClick={onClose} type="button">
             <span aria-hidden="true">×</span>
             <span className="sr-only">关闭设置与诊断</span>
           </button>
@@ -327,19 +173,21 @@ function DiagnosticsPanel() {
 }
 
 export function SettingsAndDiagnostics() {
-  const { openDiagnostics, showDiagnostics } = useStudyLibraryClient();
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   return (
     <>
       <button
         className="settings-button"
-        onClick={openDiagnostics}
+        onClick={() => setShowDiagnostics(true)}
         type="button"
       >
         <span aria-hidden="true">●</span>
         设置与诊断
       </button>
-      {showDiagnostics ? <DiagnosticsPanel /> : null}
+      {showDiagnostics ? (
+        <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
+      ) : null}
     </>
   );
 }
