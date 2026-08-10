@@ -22,7 +22,7 @@ const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
 const ADDRESS_SUFFIX_BOUNDARY_PATTERN =
-  /\b[A-Z][A-Za-z'-]*\s+(?:Ave|Blvd|Dr|Ln|Rd|St)\.(?=\s+[A-Z])/g;
+  /\b[A-Z][A-Za-z'-]*\s+(?:Ave|Blvd|Ln|Rd|St)\.(?=\s+[A-Z])/g;
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -94,6 +94,11 @@ function splitAddressSuffixBoundaries(
   for (const match of sentenceText.matchAll(ADDRESS_SUFFIX_BOUNDARY_PATTERN)) {
     if (match.index === undefined) continue;
     const boundary = sentenceRange.start + match.index + match[0].length;
+    const phraseBeforeSuffix = text.slice(sentenceRange.start, boundary);
+    const precedingWordCount =
+      phraseBeforeSuffix.match(/\b[A-Za-z][A-Za-z'-]*\b/g)?.length ?? 0;
+    if (precedingWordCount < 3) continue;
+
     ranges.push({ start: rangeStart, end: boundary });
     rangeStart = boundary;
   }

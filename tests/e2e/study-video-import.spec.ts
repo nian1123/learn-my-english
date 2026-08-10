@@ -205,6 +205,12 @@ We reached Main St. Traffic was heavy.
 
 00:00:30.000 --> 00:00:32.000
 The U.S. Government spoke.
+
+00:00:34.000 --> 00:00:36.000
+Meet Dr. Smith.
+
+00:00:38.000 --> 00:00:40.000
+Visit St. Paul.
 `;
 
   await installYouTubePlayerBoundary(page, { duration: 74 });
@@ -225,7 +231,9 @@ The U.S. Government spoke.
   await expect(
     page.getByText("The U.S. Government spoke.", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("10 句")).toBeVisible();
+  await expect(page.getByText("Meet Dr. Smith.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Visit St. Paul.", { exact: true })).toBeVisible();
+  await expect(page.getByText("12 句")).toBeVisible();
 
   await page.getByRole("button", { name: "播放第 3 句" }).click();
   await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(15));
