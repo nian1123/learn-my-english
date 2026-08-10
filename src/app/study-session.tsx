@@ -1,24 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   readStudyVideo,
   updateStudyPosition,
 } from "@/client/study-video-library";
-import type { StudyVideo } from "@/domain/study-video";
+import type {
+  LearningSentence,
+  LearningSentenceId,
+  StudyVideo,
+  StudyVideoId,
+} from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
 
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
 
-export function StudySession({ studyVideoId }: { studyVideoId: string }) {
+export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
   const [studyVideo, setStudyVideo] = useState<StudyVideo | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [activeSentenceId, setActiveSentenceId] = useState<string | null>(null);
+  const [activeSentenceId, setActiveSentenceId] =
+    useState<LearningSentenceId | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const playerRef = useRef<YouTubePlayerHandle>(null);
+  const positionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const persistPosition = useCallback(
+    (positionSeconds: number) => {
+      positionWriteQueueRef.current = positionWriteQueueRef.current
+        .catch(() => undefined)
+        .then(() => updateStudyPosition(studyVideoId, positionSeconds))
+        .then(() => {
+          setStudyVideo((current) =>
+            current
+              ? { ...current, lastPositionSeconds: positionSeconds }
+              : current,
+          );
+        })
+        .catch(() => undefined);
+    },
+    [studyVideoId],
+  );
 
   useEffect(() => {
     let active = true;
@@ -54,13 +78,12 @@ export function StudySession({ studyVideoId }: { studyVideoId: string }) {
     );
   }
 
-  const playSentence = (sentenceId: string, startSeconds: number) => {
-    setActiveSentenceId(sentenceId);
-    setStudyVideo((current) =>
-      current ? { ...current, lastPositionSeconds: startSeconds } : current,
+  const playSentence = (sentence: LearningSentence) => {
+    setActiveSentenceId(sentence.id);
+    playerRef.current?.playInterval(
+      sentence.startSeconds,
+      sentence.endSeconds,
     );
-    playerRef.current?.seekAndPlay(startSeconds);
-    void updateStudyPosition(studyVideo.id, startSeconds);
   };
 
   return (
@@ -68,7 +91,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: string }) {
       <header className="study-header">
         <Link href="/">← 返回学习库</Link>
         <div>
-          <p className="eyebrow">LISTENING PRACTICE</p>
+          <p className="eyebrow">STUDY VIDEO</p>
           <h1>{studyVideo.title}</h1>
           <p>
             {studyVideo.channel} · {formatMediaTime(studyVideo.durationSeconds)} ·
@@ -84,6 +107,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: string }) {
             onError={(code) =>
               setPlayerError(`YouTube 播放器无法载入（错误 ${code}）。`)
             }
+            onPositionChange={persistPosition}
             onReady={(player) => {
               if (studyVideo.lastPositionSeconds > 0) {
                 player.seekTo(studyVideo.lastPositionSeconds, true);
@@ -120,9 +144,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: string }) {
                       ? "learning-sentence active"
                       : "learning-sentence"
                   }
-                  onClick={() =>
-                    playSentence(sentence.id, sentence.startSeconds)
-                  }
+                  onClick={() => playSentence(sentence)}
                   type="button"
                 >
                   <span>{formatMediaTime(sentence.startSeconds)}</span>

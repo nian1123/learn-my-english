@@ -294,44 +294,6 @@ input:focus-visible {
   background: #101714;
 }
 
-.import-row {
-  display: flex;
-  gap: 10px;
-}
-
-.import-row input {
-  min-width: 0;
-  flex: 1;
-  padding: 15px 17px;
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-
-.import-row input::placeholder {
-  color: #9ca29d;
-}
-
-.import-row input:disabled {
-  cursor: not-allowed;
-  background: #efede7;
-}
-
-.import-row button {
-  padding: 0 20px;
-  color: #fff;
-  border: 0;
-  border-radius: 12px;
-  background: var(--green);
-  font-weight: 800;
-}
-
-.import-row button:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-}
-
 .import-card > p {
   margin: 13px 0 0;
   color: var(--muted);
@@ -972,14 +934,6 @@ footer {
 
   .settings-button span {
     display: none;
-  }
-
-  .import-row {
-    flex-direction: column;
-  }
-
-  .import-row button {
-    min-height: 48px;
   }
 
   .dialog-backdrop {

@@ -80,35 +80,63 @@ async function installYouTubePlayerBoundary(
         this.currentTime = seconds;
         recordCall("seekTo", seconds);
       }
+
+      setCurrentTime(seconds: number) {
+        this.currentTime = seconds;
+      }
     }
 
     const calls: Array<{ method: string; seconds?: number }> = [];
+    let currentPlayer: FakeYouTubePlayer | null = null;
     const recordCall = (method: string, seconds?: number) => {
-      calls.push({ method, seconds });
+      calls.push(seconds === undefined ? { method } : { method, seconds });
+    };
+
+    const OriginalPlayer = FakeYouTubePlayer;
+    const Player = class extends OriginalPlayer {
+      constructor(element: string | HTMLElement, playerOptions: PlayerOptions) {
+        super(element, playerOptions);
+        currentPlayer = this;
+      }
     };
 
     Reflect.set(window, "__youtubePlayerCalls", calls);
+    Reflect.set(window, "__setYouTubeCurrentTime", (seconds: number) => {
+      currentPlayer?.setCurrentTime(seconds);
+    });
     Reflect.set(window, "YT", {
-      Player: FakeYouTubePlayer,
+      Player,
       PlayerState: { CUED: 5, PLAYING: 1 },
     });
   }, options);
+}
+
+async function submitStudyVideoImport(
+  page: Page,
+  fixture: {
+    contents?: string;
+    fileName?: string;
+    mimeType?: string;
+    videoUrl?: string;
+  } = {},
+) {
+  await page.goto("/");
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill(fixture.videoUrl ?? VALID_VIDEO_URL);
+  await page.getByLabel("Caption Source 文件").setInputFiles({
+    name: fixture.fileName ?? "interview.vtt",
+    mimeType: fixture.mimeType ?? "text/vtt",
+    buffer: Buffer.from(fixture.contents ?? CAPTION_SOURCE),
+  });
+  await page.getByRole("button", { name: "导入视频" }).click();
 }
 
 test("learner imports a Study Video with a VTT Caption Source", async ({
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await page.goto("/");
-
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(CAPTION_SOURCE),
-  });
-  await page.getByRole("button", { name: "导入视频" }).click();
+  await submitStudyVideoImport(page);
 
   await expect(
     page.getByRole("heading", { name: "The Daily American Interview" }),
@@ -119,21 +147,26 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: "播放第 2 句" }).click();
-  const playerCalls = await page.evaluate(() =>
-    Reflect.get(window, "__youtubePlayerCalls"),
-  );
-  expect(playerCalls).toEqual([
-    { method: "seekTo", seconds: 4 },
-    { method: "playVideo" },
-  ]);
-  await expect(page.getByText("上次位置 0:04")).toBeVisible();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(7));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
+
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(11));
+  await expect(page.getByText("上次位置 0:11")).toBeVisible();
 
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "The Daily American Interview" }),
   ).toBeVisible();
   await expect(page.getByText("Welcome to the show.")).toBeVisible();
-  await expect(page.getByText("上次位置 0:04")).toBeVisible();
+  await expect(page.getByText("上次位置 0:11")).toBeVisible();
 
   await page.getByRole("link", { name: "返回学习库" }).click();
   await expect(
@@ -141,22 +174,43 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
   ).toBeVisible();
   await expect(page.getByText("Everyday Voices")).toBeVisible();
   await expect(page.getByText("1:14")).toBeVisible();
-  await expect(page.getByText("上次位置 0:04")).toBeVisible();
+  await expect(page.getByText("上次位置 0:11")).toBeVisible();
+});
+
+test("caption fragments become punctuation and three-second Learning Sentences", async ({
+  page,
+}) => {
+  const fragmentedCaptionSource = `WEBVTT
+
+00:00:01.000 --> 00:00:02.000
+Welcome
+
+00:00:02.200 --> 00:00:03.000
+to the show.
+
+00:00:07.000 --> 00:00:08.000
+Next thought
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: fragmentedCaptionSource,
+    fileName: "fragments.vtt",
+  });
+
+  await expect(page.getByText("Welcome to the show.")).toBeVisible();
+  await expect(page.getByText("Next thought")).toBeVisible();
+  await expect(page.getByText("2 句")).toBeVisible();
 });
 
 test("learner is warned when the Caption Source content type is unsupported", async ({
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await page.goto("/");
-
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "disguised.vtt",
+  await submitStudyVideoImport(page, {
+    fileName: "disguised.vtt",
     mimeType: "image/png",
-    buffer: Buffer.from(CAPTION_SOURCE),
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(
     page
@@ -175,31 +229,24 @@ test("learner gets a localized error for a malformed Caption Source block", asyn
 This cue must not be silently dropped.
 `;
 
-  await page.goto("/");
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "partially-malformed.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(partiallyMalformedCaptionSource),
+  await submitStudyVideoImport(page, {
+    contents: partiallyMalformedCaptionSource,
+    fileName: "partially-malformed.vtt",
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(
-    page.getByRole("alert").filter({ hasText: "第 3 个区块缺少有效时间轴" }),
+    page.getByRole("alert").filter({ hasText: "第 3 个时间段无效" }),
   ).toBeVisible();
   await expect(page.getByText("还没有学习视频")).toBeVisible();
 });
 
 test("learner imports an SRT Caption Source", async ({ page }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await page.goto("/");
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.srt",
+  await submitStudyVideoImport(page, {
+    contents: SRT_CAPTION_SOURCE,
+    fileName: "interview.srt",
     mimeType: "application/x-subrip",
-    buffer: Buffer.from(SRT_CAPTION_SOURCE),
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(page.getByText("Welcome from the SRT source.")).toBeVisible();
   await expect(
@@ -210,16 +257,9 @@ test("learner imports an SRT Caption Source", async ({ page }) => {
 test("learner is given a supported URL example for an invalid URL", async ({
   page,
 }) => {
-  await page.goto("/");
-  await page
-    .getByLabel("YouTube 视频链接")
-    .fill("https://www.youtube.com/playlist?list=not-a-video");
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(CAPTION_SOURCE),
+  await submitStudyVideoImport(page, {
+    videoUrl: "https://www.youtube.com/playlist?list=not-a-video",
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(
     page
@@ -229,18 +269,72 @@ test("learner is given a supported URL example for an invalid URL", async ({
   await expect(page.getByText("还没有学习视频")).toBeVisible();
 });
 
+test("syntactically invalid URL receives the app's Chinese guidance", async ({
+  page,
+}) => {
+  await submitStudyVideoImport(page, { videoUrl: "not a url" });
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "请输入完整的 YouTube 视频链接" }),
+  ).toBeVisible();
+});
+
+test("out-of-range timestamps are rejected", async ({ page }) => {
+  const malformedTimestampSource = `WEBVTT
+
+00:99:99.000 --> 02:00:00.000
+This timestamp is not valid.
+`;
+
+  await submitStudyVideoImport(page, {
+    contents: malformedTimestampSource,
+    fileName: "invalid-time.vtt",
+  });
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "第 1 个时间段无效" }),
+  ).toBeVisible();
+});
+
+test("an invalid WEBVTT signature is rejected", async ({ page }) => {
+  const invalidSignatureSource = `WEBVTTjunk
+
+00:00:01.000 --> 00:00:02.000
+This is not a valid WebVTT file.
+`;
+
+  await submitStudyVideoImport(page, {
+    contents: invalidSignatureSource,
+    fileName: "invalid-signature.vtt",
+  });
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "VTT 文件缺少 WEBVTT 文件头" }),
+  ).toBeVisible();
+});
+
+test("SRT timestamps must include hours", async ({ page }) => {
+  const hourlessSrtSource = `1
+00:01,000 --> 00:03,000
+SRT needs an hours field.
+`;
+
+  await submitStudyVideoImport(page, {
+    contents: hourlessSrtSource,
+    fileName: "hourless.srt",
+    mimeType: "application/x-subrip",
+  });
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "第 1 个时间段无效" }),
+  ).toBeVisible();
+});
+
 test("non-embeddable video is rejected without a partial Study Video", async ({
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 74, errorCode: 101 });
-  await page.goto("/");
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(CAPTION_SOURCE),
-  });
-  await page.getByRole("button", { name: "导入视频" }).click();
+  await submitStudyVideoImport(page);
 
   await expect(
     page
@@ -255,14 +349,7 @@ test("video over three hours is rejected without a partial Study Video", async (
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 10_801 });
-  await page.goto("/");
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(CAPTION_SOURCE),
-  });
-  await page.getByRole("button", { name: "导入视频" }).click();
+  await submitStudyVideoImport(page);
 
   await expect(
     page.getByRole("alert").filter({ hasText: "视频超过 3 小时" }),
@@ -272,16 +359,9 @@ test("video over three hours is rejected without a partial Study Video", async (
 
 test("canceling a slow import leaves no partial Study Video", async ({ page }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await page.goto("/");
-  await page
-    .getByLabel("YouTube 视频链接")
-    .fill("https://youtu.be/slowvideo01");
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: "interview.vtt",
-    mimeType: "text/vtt",
-    buffer: Buffer.from(CAPTION_SOURCE),
+  await submitStudyVideoImport(page, {
+    videoUrl: "https://youtu.be/slowvideo01",
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(page.getByText("正在读取视频信息…")).toBeVisible();
   await page.getByRole("button", { name: "取消导入" }).click();

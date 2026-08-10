@@ -10,34 +10,67 @@ import {
 } from "react";
 
 import type { YouTubePlayerInstance } from "@/client/youtube-iframe-api";
+import type { YouTubeVideoId } from "@/domain/study-video";
 
 export type YouTubePlayerHandle = {
-  getDuration: () => number;
-  seekTo: (seconds: number) => void;
-  seekAndPlay: (seconds: number) => void;
+  playInterval: (startSeconds: number, endSeconds: number) => void;
 };
 
 type YouTubePlayerProps = {
   className?: string;
   onError?: (code: number) => void;
+  onPositionChange?: (seconds: number) => void;
   onReady?: (player: YouTubePlayerInstance) => void;
-  videoId: string;
+  videoId: YouTubeVideoId;
 };
 
 export const YouTubePlayer = forwardRef<
   YouTubePlayerHandle,
   YouTubePlayerProps
 >(function YouTubePlayer(
-  { className, onError, onReady, videoId },
+  { className, onError, onPositionChange, onReady, videoId },
   forwardedRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerInstance | null>(null);
+  const pendingPlaybackRef = useRef<{
+    startSeconds: number;
+    endSeconds: number;
+  } | null>(null);
+  const playbackEndRef = useRef<number | null>(null);
+  const positionTimerRef = useRef<number | null>(null);
+  const lastReportedSecondRef = useRef<number | null>(null);
   const onErrorRef = useRef(onError);
+  const onPositionChangeRef = useRef(onPositionChange);
   const onReadyRef = useRef(onReady);
 
   onErrorRef.current = onError;
+  onPositionChangeRef.current = onPositionChange;
   onReadyRef.current = onReady;
+
+  const startPositionMonitoring = useCallback(
+    (player: YouTubePlayerInstance) => {
+      if (positionTimerRef.current !== null) return;
+
+      positionTimerRef.current = window.setInterval(() => {
+        const position = player.getCurrentTime();
+        if (!Number.isFinite(position) || position < 0) return;
+
+        const playbackEnd = playbackEndRef.current;
+        if (playbackEnd !== null && position >= playbackEnd) {
+          player.pauseVideo();
+          playbackEndRef.current = null;
+        }
+
+        const wholeSecond = Math.floor(position);
+        if (wholeSecond !== lastReportedSecondRef.current) {
+          lastReportedSecondRef.current = wholeSecond;
+          onPositionChangeRef.current?.(wholeSecond);
+        }
+      }, 250);
+    },
+    [],
+  );
 
   const initializePlayer = useCallback(() => {
     if (!window.YT || !containerRef.current || playerRef.current) return;
@@ -53,10 +86,20 @@ export const YouTubePlayer = forwardRef<
       },
       events: {
         onError: (event) => onErrorRef.current?.(event.data),
-        onReady: (event) => onReadyRef.current?.(event.target),
+        onReady: (event) => {
+          startPositionMonitoring(event.target);
+          const pendingPlayback = pendingPlaybackRef.current;
+          if (pendingPlayback) {
+            playbackEndRef.current = pendingPlayback.endSeconds;
+            event.target.seekTo(pendingPlayback.startSeconds, true);
+            event.target.playVideo();
+            pendingPlaybackRef.current = null;
+          }
+          onReadyRef.current?.(event.target);
+        },
       },
     });
-  }, [videoId]);
+  }, [startPositionMonitoring, videoId]);
 
   useEffect(() => {
     const previousReadyCallback = window.onYouTubeIframeAPIReady;
@@ -72,6 +115,13 @@ export const YouTubePlayer = forwardRef<
       if (window.onYouTubeIframeAPIReady === readyCallback) {
         window.onYouTubeIframeAPIReady = previousReadyCallback;
       }
+      if (positionTimerRef.current !== null) {
+        window.clearInterval(positionTimerRef.current);
+        positionTimerRef.current = null;
+      }
+      playbackEndRef.current = null;
+      pendingPlaybackRef.current = null;
+      lastReportedSecondRef.current = null;
       playerRef.current?.destroy();
       playerRef.current = null;
     };
@@ -80,11 +130,16 @@ export const YouTubePlayer = forwardRef<
   useImperativeHandle(
     forwardedRef,
     () => ({
-      getDuration: () => playerRef.current?.getDuration() ?? 0,
-      seekTo: (seconds) => playerRef.current?.seekTo(seconds, true),
-      seekAndPlay: (seconds) => {
-        playerRef.current?.seekTo(seconds, true);
-        playerRef.current?.playVideo();
+      playInterval: (startSeconds, endSeconds) => {
+        playbackEndRef.current = endSeconds;
+        const player = playerRef.current;
+        if (!player) {
+          pendingPlaybackRef.current = { startSeconds, endSeconds };
+          return;
+        }
+
+        player.seekTo(startSeconds, true);
+        player.playVideo();
       },
     }),
     [],

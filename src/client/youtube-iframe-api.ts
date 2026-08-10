@@ -1,3 +1,5 @@
+import type { YouTubeVideoId } from "@/domain/study-video";
+
 export type YouTubePlayerInstance = {
   destroy: () => void;
   getCurrentTime: () => number;
@@ -10,7 +12,7 @@ export type YouTubePlayerInstance = {
 type YouTubePlayerOptions = {
   height: number;
   width: number;
-  videoId: string;
+  videoId: YouTubeVideoId;
   playerVars: {
     cc_load_policy: 0 | 1;
     origin: string;

@@ -5,7 +5,7 @@ import {
   requestResult,
   transactionCompleted,
 } from "./learning-database";
-import type { StudyVideo } from "@/domain/study-video";
+import type { StudyVideo, StudyVideoId } from "@/domain/study-video";
 
 function isStudyVideo(value: unknown): value is StudyVideo {
   if (typeof value !== "object" || value === null) return false;
@@ -38,7 +38,7 @@ export async function saveStudyVideo(studyVideo: StudyVideo): Promise<void> {
   }
 }
 
-export async function readStudyVideo(id: string): Promise<StudyVideo | null> {
+export async function readStudyVideo(id: StudyVideoId): Promise<StudyVideo | null> {
   const database = await openLearningDatabase();
 
   try {
@@ -78,7 +78,7 @@ export async function readStudyLibrary(): Promise<StudyVideo[]> {
 }
 
 export async function updateStudyPosition(
-  id: string,
+  id: StudyVideoId,
   positionSeconds: number,
 ): Promise<void> {
   const studyVideo = await readStudyVideo(id);

@@ -2,11 +2,19 @@ import type {
   CaptionCue,
   CaptionFormat,
   CaptionSource,
+  CaptionSourceId,
   LearningSentence,
 } from "./study-video";
+import {
+  captionCueIdForIndex,
+  learningSentenceIdForIndex,
+} from "./study-video";
 
-const TIMING_PATTERN =
-  /^(\d{2,}:\d{2}:\d{2}[.,]\d{3}|\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d{2,}:\d{2}:\d{2}[.,]\d{3}|\d{2}:\d{2}[.,]\d{3})(?:\s+.*)?$/;
+const TIMING_LINE_PATTERN = /^(\S+)\s+-->\s+(\S+)(?:\s+.*)?$/;
+const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
+const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
+const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
+const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -24,13 +32,19 @@ function formatForFileName(fileName: string): CaptionFormat {
   );
 }
 
-function timestampSeconds(value: string): number {
-  const normalized = value.replace(",", ".");
-  const parts = normalized.split(":");
-  const seconds = Number(parts.pop());
-  const minutes = Number(parts.pop());
-  const hours = parts.length > 0 ? Number(parts.pop()) : 0;
-  return hours * 3600 + minutes * 60 + seconds;
+function timestampSeconds(value: string, format: CaptionFormat): number | null {
+  const match = value.match(
+    format === "vtt" ? VTT_TIMESTAMP_PATTERN : SRT_TIMESTAMP_PATTERN,
+  );
+  if (!match) return null;
+
+  const [, hoursValue, minutesValue, secondsValue, millisecondsValue] = match;
+  const hours = format === "vtt" && hoursValue === undefined ? 0 : Number(hoursValue);
+  const minutes = Number(minutesValue);
+  const seconds = Number(secondsValue);
+  const milliseconds = Number(millisecondsValue);
+  const total = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+  return Number.isFinite(total) ? total : null;
 }
 
 function cleanCueText(lines: string[]): string {
@@ -41,7 +55,11 @@ function cleanCueText(lines: string[]): string {
     .trim();
 }
 
-function cueFromBlock(block: string, index: number): CaptionCue | null {
+function cueFromBlock(
+  block: string,
+  index: number,
+  format: CaptionFormat,
+): CaptionCue | null {
   const lines = block
     .split("\n")
     .map((line) => line.trim())
@@ -50,23 +68,27 @@ function cueFromBlock(block: string, index: number): CaptionCue | null {
   if (lines.length === 0) return null;
   if (/^(NOTE|STYLE|REGION)(\s|$)/.test(lines[0] ?? "")) return null;
 
-  const timingIndex = lines.findIndex((line) => TIMING_PATTERN.test(line));
+  const timingIndex = lines.findIndex((line) => line.includes("-->"));
   if (timingIndex < 0) {
     throw new CaptionSourceParseError(
       `第 ${index + 1} 个区块缺少有效时间轴，请检查箭头和时间格式。`,
     );
   }
 
-  const timing = lines[timingIndex]?.match(TIMING_PATTERN);
-  if (!timing) return null;
+  const timing = lines[timingIndex]?.match(TIMING_LINE_PATTERN);
+  if (!timing) {
+    throw new CaptionSourceParseError(
+      `第 ${index + 1} 个时间段无效，请检查起止时间和英文内容。`,
+    );
+  }
 
-  const startSeconds = timestampSeconds(timing[1]);
-  const endSeconds = timestampSeconds(timing[2]);
+  const startSeconds = timestampSeconds(timing[1], format);
+  const endSeconds = timestampSeconds(timing[2], format);
   const text = cleanCueText(lines.slice(timingIndex + 1));
 
   if (
-    !Number.isFinite(startSeconds) ||
-    !Number.isFinite(endSeconds) ||
+    startSeconds === null ||
+    endSeconds === null ||
     startSeconds < 0 ||
     endSeconds <= startSeconds ||
     !text
@@ -77,7 +99,7 @@ function cueFromBlock(block: string, index: number): CaptionCue | null {
   }
 
   return {
-    id: `cue-${index + 1}`,
+    id: captionCueIdForIndex(index),
     startSeconds,
     endSeconds,
     text,
@@ -85,23 +107,24 @@ function cueFromBlock(block: string, index: number): CaptionCue | null {
 }
 
 export function parseLearnerCaptionSource(
-  id: string,
+  id: CaptionSourceId,
   fileName: string,
   contents: string,
 ): CaptionSource {
   const format = formatForFileName(fileName);
   const normalized = contents.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 
-  if (format === "vtt" && !normalized.trimStart().startsWith("WEBVTT")) {
+  const [firstLine = "", ...remainingLines] = normalized.split("\n");
+  if (format === "vtt" && !/^WEBVTT(?:[ \t].*)?$/.test(firstLine)) {
     throw new CaptionSourceParseError(
       "VTT 文件缺少 WEBVTT 文件头，请检查文件是否完整。",
     );
   }
 
-  const body = format === "vtt" ? normalized.replace(/^\s*WEBVTT[^\n]*\n?/, "") : normalized;
+  const body = format === "vtt" ? remainingLines.join("\n") : normalized;
   const cues = body
     .split(/\n{2,}/)
-    .map(cueFromBlock)
+    .map((block, index) => cueFromBlock(block, index, format))
     .filter((cue): cue is CaptionCue => cue !== null)
     .sort((left, right) => left.startSeconds - right.startSeconds);
 
@@ -123,12 +146,40 @@ export function parseLearnerCaptionSource(
 export function learningSentencesFromCues(
   captionSource: CaptionSource,
 ): LearningSentence[] {
-  return captionSource.cues.map((cue, index) => ({
-    id: `sentence-${index + 1}`,
-    captionSourceId: captionSource.id,
-    sourceCueIds: [cue.id],
-    startSeconds: cue.startSeconds,
-    endSeconds: cue.endSeconds,
-    text: cue.text,
-  }));
+  const sentences: LearningSentence[] = [];
+  let sentenceCues: CaptionCue[] = [];
+
+  const finishSentence = () => {
+    const firstCue = sentenceCues[0];
+    const lastCue = sentenceCues.at(-1);
+    if (!firstCue || !lastCue) return;
+
+    sentences.push({
+      id: learningSentenceIdForIndex(sentences.length),
+      captionSourceId: captionSource.id,
+      sourceCueIds: sentenceCues.map((cue) => cue.id),
+      startSeconds: firstCue.startSeconds,
+      endSeconds: lastCue.endSeconds,
+      text: sentenceCues.map((cue) => cue.text).join(" "),
+    });
+    sentenceCues = [];
+  };
+
+  captionSource.cues.forEach((cue, index) => {
+    sentenceCues.push(cue);
+    const nextCue = captionSource.cues[index + 1];
+    const gapToNextCue = nextCue
+      ? nextCue.startSeconds - cue.endSeconds
+      : Number.POSITIVE_INFINITY;
+
+    if (
+      TERMINAL_PUNCTUATION_PATTERN.test(cue.text) ||
+      gapToNextCue >= MAXIMUM_SENTENCE_GAP_SECONDS
+    ) {
+      finishSentence();
+    }
+  });
+
+  finishSentence();
+  return sentences;
 }

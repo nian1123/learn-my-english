@@ -1,3 +1,5 @@
+import type { YouTubeVideoId } from "./study-video";
+
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const YOUTUBE_HOSTS = new Set([
   "youtube.com",
@@ -12,12 +14,16 @@ export class YouTubeUrlError extends Error {
   }
 }
 
-export function isYouTubeVideoId(value: string): boolean {
+export function isYouTubeVideoId(value: string): value is YouTubeVideoId {
   return YOUTUBE_VIDEO_ID_PATTERN.test(value);
 }
 
+export function canonicalYouTubeVideoUrl(videoId: YouTubeVideoId): string {
+  return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
 export function parseYouTubeVideoUrl(input: string): {
-  videoId: string;
+  videoId: YouTubeVideoId;
   canonicalUrl: string;
 } {
   let url: URL;
@@ -51,6 +57,6 @@ export function parseYouTubeVideoUrl(input: string): {
 
   return {
     videoId,
-    canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+    canonicalUrl: canonicalYouTubeVideoUrl(videoId),
   };
 }

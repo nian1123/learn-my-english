@@ -1,7 +1,10 @@
 import "server-only";
 
 import type { YouTubeVideoMetadata } from "@/domain/study-video";
-import { isYouTubeVideoId } from "@/domain/youtube-url";
+import {
+  canonicalYouTubeVideoUrl,
+  isYouTubeVideoId,
+} from "@/domain/youtube-url";
 
 const METADATA_TIMEOUT_MS = 5_000;
 
@@ -45,7 +48,7 @@ export async function readYouTubeMetadata(
     throw new YouTubeMetadataError("视频标识无效。", 400);
   }
 
-  const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const canonicalUrl = canonicalYouTubeVideoUrl(videoId);
   const endpoint = new URL(
     process.env.YOUTUBE_OEMBED_BASE_URL?.trim() ||
       "https://www.youtube.com/oembed",
