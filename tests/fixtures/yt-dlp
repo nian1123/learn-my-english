@@ -1,9 +1,131 @@
 #!/usr/bin/env node
 
-if (process.argv.includes("--version")) {
+const { mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+
+const arguments_ = process.argv.slice(2);
+const videoUrl = arguments_.find((value) =>
+  value.startsWith("https://www.youtube.com/watch?v="),
+) ?? "";
+const videoId = new URL(videoUrl || "https://www.youtube.com/watch?v=invalid")
+  .searchParams.get("v");
+
+if (arguments_.includes("--version")) {
   process.stdout.write("2026.08.10-test\n");
   process.exit(0);
 }
 
-process.stderr.write("This fixture only supports --version.\n");
-process.exit(1);
+const requiredCommonArguments = [
+  "--ignore-config",
+  "--no-playlist",
+  "--skip-download",
+];
+if (
+  videoUrl &&
+  requiredCommonArguments.some((argument) => !arguments_.includes(argument))
+) {
+  process.stderr.write("Unsafe or incomplete yt-dlp argument contract.\n");
+  process.exit(4);
+}
+
+if (videoId === "failure0001") {
+  process.stderr.write("deterministic caption provider failure\n");
+  process.exit(3);
+}
+
+if (arguments_.includes("--dump-single-json")) {
+  const writeInspection = () => {
+    process.stdout.write(
+      JSON.stringify({
+        automatic_captions:
+          videoId === "dQw4w9WgXcQ"
+            ? {
+                en: [
+                  {
+                    ext: "vtt",
+                    url: "https://captions.test/unused-automatic",
+                  },
+                ],
+              }
+            : videoId === "autocaps001"
+              ? {
+                  "en-US": [
+                    {
+                      ext: "vtt",
+                      url: "https://captions.test/automatic",
+                    },
+                  ],
+                }
+              : {},
+        id: videoId,
+        subtitles:
+          videoId === "dQw4w9WgXcQ"
+            ? { en: [{ ext: "vtt", url: "https://captions.test/manual" }] }
+            : {},
+      }),
+    );
+  };
+
+  if (videoId === "slowcap0001" || videoId === "timeout0001") {
+    setTimeout(writeInspection, 2_000);
+  } else {
+    writeInspection();
+  }
+  return;
+}
+
+if (arguments_.includes("--write-auto-subs")) {
+  const pathsIndex = arguments_.indexOf("--paths");
+  const directory = pathsIndex >= 0 ? arguments_[pathsIndex + 1] : "";
+  if (
+    !directory ||
+    videoId !== "autocaps001" ||
+    arguments_[arguments_.indexOf("--sub-langs") + 1] !== "en-US" ||
+    arguments_[arguments_.indexOf("--sub-format") + 1] !== "vtt" ||
+    arguments_[arguments_.indexOf("--output") + 1] !== "caption.%(ext)s"
+  ) {
+    process.exit(2);
+  }
+
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "caption.en-US.vtt"),
+    `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Practice with automatic captions.
+`,
+  );
+  process.exit(0);
+}
+
+if (arguments_.includes("--write-subs")) {
+  const pathsIndex = arguments_.indexOf("--paths");
+  const directory = pathsIndex >= 0 ? arguments_[pathsIndex + 1] : "";
+  if (
+    !directory ||
+    videoId !== "dQw4w9WgXcQ" ||
+    arguments_[arguments_.indexOf("--sub-langs") + 1] !== "en" ||
+    arguments_[arguments_.indexOf("--sub-format") + 1] !== "vtt" ||
+    arguments_[arguments_.indexOf("--output") + 1] !== "caption.%(ext)s"
+  ) {
+    process.exit(2);
+  }
+
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "caption.en.vtt"),
+    `WEBVTT
+
+00:00:01.000 --> 00:00:03.500
+Welcome to the show.
+
+00:00:04.000 --> 00:00:07.000
+Today we're talking about practice.
+`,
+  );
+  process.exit(0);
+}
+
+process.stderr.write("Unsupported deterministic yt-dlp fixture arguments.\n");
+process.exit(2);

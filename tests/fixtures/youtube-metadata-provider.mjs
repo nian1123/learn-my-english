@@ -15,7 +15,13 @@ const server = createServer((request, response) => {
   if (requestUrl.pathname === "/oembed") {
     const videoUrl = requestUrl.searchParams.get("url") ?? "";
     const knownVideo =
-      videoUrl.includes("dQw4w9WgXcQ") || videoUrl.includes("slowvideo01");
+      videoUrl.includes("dQw4w9WgXcQ") ||
+      videoUrl.includes("autocaps001") ||
+      videoUrl.includes("failure0001") ||
+      videoUrl.includes("nocaptions1") ||
+      videoUrl.includes("slowcap0001") ||
+      videoUrl.includes("timeout0001") ||
+      videoUrl.includes("slowvideo01");
 
     if (!knownVideo) {
       response.writeHead(404, { "content-type": "application/json" });

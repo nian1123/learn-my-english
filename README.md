@@ -1,6 +1,6 @@
 # Learn My English
 
-一个本地优先的美式英语听力学习应用。当前版本支持用 YouTube URL 和学习者提供的 VTT/SRT Caption Source 创建 Study Video，并在官方 YouTube 嵌入播放器中按 Learning Sentence 定位练习。
+一个本地优先的美式英语听力学习应用。粘贴 YouTube URL 后，应用会尝试获取已有英文 Caption Source，也可以在自动获取失败后使用学习者提供的 VTT/SRT，并通过官方 YouTube 嵌入播放器按 Learning Sentence 定位练习。
 
 ## 本地启动
 
@@ -17,10 +17,10 @@ npm run dev
 ## 导入第一个 Study Video
 
 1. 在 Study Library 粘贴一个 `youtube.com/watch?v=…` 或 `youtu.be/…` 单视频链接。
-2. 选择一个有效的 `.vtt` 或 `.srt` Caption Source。
-3. 点击“导入视频”。应用会读取公开元数据，通过官方 IFrame Player API 检查可嵌入性与时长，然后一次性保存到浏览器 IndexedDB。
+2. 点击“开始导入”。应用会读取公开元数据，通过官方 IFrame Player API 检查可嵌入性与时长，然后优先获取人工英文字幕，没有时再获取自动生成的英文字幕。
+3. 如果自动获取失败、超时或本机缺少 `yt-dlp`，按界面提示上传有效的 `.vtt` 或 `.srt` Caption Source 继续。
 
-不可嵌入、不是公开内容、超过 3 小时或 Caption Source 损坏时，应用会用中文说明下一步，并且不会留下半成品 Study Video。
+导入过程会显示当前阶段。不可嵌入、不是公开内容、超过 3 小时或 Caption Source 损坏时，应用会用中文说明下一步，并且不会留下半成品 Study Video。
 
 ## 可选 AI 配置
 

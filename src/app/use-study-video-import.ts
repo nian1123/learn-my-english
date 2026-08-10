@@ -8,6 +8,7 @@ import { saveStudyVideo } from "@/client/study-video-library";
 import {
   CaptionSourceParseError,
   learningSentencesFromCues,
+  parseCaptionSource,
   parseLearnerCaptionSource,
 } from "@/domain/caption-source";
 import type {
@@ -41,19 +42,36 @@ type ImportStage =
   | "idle"
   | "reading-metadata"
   | "checking-embed"
+  | "acquiring-captions"
+  | "parsing-captions"
+  | "generating-sentences"
   | "saving"
   | "error";
 
+type ImportProgressStage = Exclude<ImportStage, "error" | "idle">;
+
 export type PendingStudyVideoImport = {
-  captionSource: CaptionSource;
-  learningSentences: LearningSentence[];
   metadata: YouTubeVideoMetadata;
 };
 
-const STAGE_COPY: Record<Exclude<ImportStage, "idle" | "error">, string> = {
+type ValidatedStudyVideoImport = PendingStudyVideoImport & {
+  durationSeconds: number;
+};
+
+const STAGE_COPY: Record<ImportProgressStage, string> = {
   "reading-metadata": "正在读取视频信息…",
   "checking-embed": "正在检查视频是否可嵌入…",
+  "acquiring-captions": "正在通过非官方 yt-dlp 获取英文字幕…",
+  "parsing-captions": "正在解析 Caption Source…",
+  "generating-sentences": "正在生成 Learning Sentence…",
   saving: "正在保存到学习库…",
+};
+
+type CaptionAcquisition = {
+  contents: string;
+  fileName: string;
+  format: "srt" | "vtt";
+  kind: "auto-generated" | "manual";
 };
 
 async function waitForDuration(player: YouTubePlayerInstance): Promise<number> {
@@ -107,16 +125,42 @@ function metadataResponse(
   };
 }
 
+function captionAcquisitionResponse(value: unknown): CaptionAcquisition | null {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Record<string, unknown>;
+
+  if (
+    typeof candidate.contents !== "string" ||
+    typeof candidate.fileName !== "string" ||
+    (candidate.format !== "srt" && candidate.format !== "vtt") ||
+    (candidate.kind !== "manual" && candidate.kind !== "auto-generated") ||
+    !candidate.fileName.toLowerCase().endsWith(`.${candidate.format}`)
+  ) {
+    return null;
+  }
+
+  return {
+    contents: candidate.contents,
+    fileName: candidate.fileName,
+    format: candidate.format,
+    kind: candidate.kind,
+  };
+}
+
 export function useStudyVideoImport() {
   const router = useRouter();
   const { persistenceStatus } = useStudyLibraryClient();
   const [videoUrl, setVideoUrl] = useState("");
   const [captionFile, setCaptionFile] = useState<File | null>(null);
   const [stage, setStage] = useState<ImportStage>("idle");
+  const [lastProgressStage, setLastProgressStage] =
+    useState<ImportProgressStage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [youtubeOpenUrl, setYouTubeOpenUrl] = useState<string | null>(null);
   const [pendingImport, setPendingImport] =
     useState<PendingStudyVideoImport | null>(null);
+  const [manualFallback, setManualFallback] =
+    useState<ValidatedStudyVideoImport | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const importActiveRef = useRef(false);
 
@@ -133,49 +177,81 @@ export function useStudyVideoImport() {
     setYouTubeOpenUrl(null);
   };
 
+  const advanceImport = (nextStage: ImportProgressStage) => {
+    setLastProgressStage(nextStage);
+    setStage(nextStage);
+  };
+
+  const paintImportStage = async (nextStage: ImportProgressStage) => {
+    advanceImport(nextStage);
+    await new Promise<void>((resolve) =>
+      window.requestAnimationFrame(() => resolve()),
+    );
+  };
+
   const failImport = (message: string, openUrl?: string) => {
     importActiveRef.current = false;
     setPendingImport(null);
+    setManualFallback(null);
     setStage("error");
     setError(message);
     setYouTubeOpenUrl(openUrl ?? null);
   };
 
+  const offerManualFallback = (
+    message: string,
+    candidate: ValidatedStudyVideoImport,
+  ) => {
+    importActiveRef.current = false;
+    setPendingImport(null);
+    setManualFallback(candidate);
+    setStage("error");
+    setError(message);
+    setYouTubeOpenUrl(candidate.metadata.canonicalUrl);
+  };
+
+  const persistStudyVideo = async (
+    candidate: ValidatedStudyVideoImport,
+    captionSource: CaptionSource,
+    learningSentences: LearningSentence[],
+  ) => {
+    const studyVideoId = studyVideoIdFor(candidate.metadata.videoId);
+    await paintImportStage("saving");
+    await saveStudyVideo({
+      schemaVersion: 1,
+      id: studyVideoId,
+      youtubeVideoId: candidate.metadata.videoId,
+      title: candidate.metadata.title,
+      channel: candidate.metadata.channel,
+      thumbnailUrl: candidate.metadata.thumbnailUrl,
+      durationSeconds: candidate.durationSeconds,
+      lastPositionSeconds: 0,
+      lastStudiedAt: new Date().toISOString(),
+      captionSource,
+      learningSentences,
+    });
+    importActiveRef.current = false;
+    setManualFallback(null);
+    router.push(`/study/${encodeURIComponent(studyVideoId)}`);
+  };
+
   const startImport = async () => {
     resetError();
+    setLastProgressStage(null);
+    setManualFallback(null);
+    setCaptionFile(null);
 
     if (persistenceStatus !== "available") {
       failImport("本地数据尚未就绪，请刷新页面后重试。");
       return;
     }
 
-    if (!captionFile) {
-      failImport("请选择一个 .vtt 或 .srt 格式的 Caption Source。");
-      return;
-    }
-
-    if (
-      captionFile.type &&
-      !SUPPORTED_CAPTION_CONTENT_TYPES.has(captionFile.type.toLowerCase())
-    ) {
-      failImport(
-        `文件内容类型 ${captionFile.type} 不受支持，请选择有效的 VTT 或 SRT 文本。`,
-      );
-      return;
-    }
-
     try {
       const { videoId } = parseYouTubeVideoUrl(videoUrl);
-      const captionSource = parseLearnerCaptionSource(
-        captionSourceIdFor(videoId),
-        captionFile.name,
-        await captionFile.text(),
-      );
-      const learningSentences = learningSentencesFromCues(captionSource);
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       importActiveRef.current = true;
-      setStage("reading-metadata");
+      advanceImport("reading-metadata");
 
       const response = await fetch(
         `/api/youtube/metadata?videoId=${encodeURIComponent(videoId)}`,
@@ -194,18 +270,15 @@ export function useStudyVideoImport() {
         return;
       }
 
-      setPendingImport({ captionSource, learningSentences, metadata });
-      setStage("checking-embed");
+      setPendingImport({ metadata });
+      advanceImport("checking-embed");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
-      if (
-        caught instanceof YouTubeUrlError ||
-        caught instanceof CaptionSourceParseError
-      ) {
+      if (caught instanceof YouTubeUrlError) {
         failImport(caught.message);
         return;
       }
-      failImport("导入准备失败，请检查链接和 Caption Source 后重试。");
+      failImport("导入准备失败，请检查链接后重试。");
     }
   };
 
@@ -231,26 +304,119 @@ export function useStudyVideoImport() {
       return;
     }
 
+    const validatedCandidate = { ...candidate, durationSeconds };
+    let persistenceStarted = false;
     try {
-      const studyVideoId = studyVideoIdFor(candidate.metadata.videoId);
-      setStage("saving");
-      await saveStudyVideo({
-        schemaVersion: 1,
-        id: studyVideoId,
-        youtubeVideoId: candidate.metadata.videoId,
-        title: candidate.metadata.title,
-        channel: candidate.metadata.channel,
-        thumbnailUrl: candidate.metadata.thumbnailUrl,
-        durationSeconds,
-        lastPositionSeconds: 0,
-        lastStudiedAt: new Date().toISOString(),
-        captionSource: candidate.captionSource,
-        learningSentences: candidate.learningSentences,
+      const abortController = abortControllerRef.current;
+      if (!abortController) return;
+      advanceImport("acquiring-captions");
+      const captionResponse = await fetch("/api/youtube/captions", {
+        body: JSON.stringify({ videoId: candidate.metadata.videoId }),
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        signal: abortController.signal,
       });
-      importActiveRef.current = false;
-      router.push(`/study/${encodeURIComponent(studyVideoId)}`);
-    } catch {
-      failImport("保存失败，没有创建任何 Study Video。请检查浏览器本地数据权限。");
+      const captionPayload: unknown = await captionResponse.json();
+      if (!captionResponse.ok) {
+        offerManualFallback(responseError(captionPayload), validatedCandidate);
+        return;
+      }
+
+      const acquisition = captionAcquisitionResponse(captionPayload);
+      if (!acquisition) {
+        offerManualFallback(
+          "自动字幕服务返回了不完整的 Caption Source。你可以上传 VTT/SRT 文件。",
+          validatedCandidate,
+        );
+        return;
+      }
+
+      await paintImportStage("parsing-captions");
+      const captionSource = parseCaptionSource(
+        captionSourceIdFor(candidate.metadata.videoId),
+        acquisition.fileName,
+        acquisition.contents,
+        acquisition.kind,
+      );
+      await paintImportStage("generating-sentences");
+      const learningSentences = learningSentencesFromCues(captionSource);
+      persistenceStarted = true;
+      await persistStudyVideo(
+        validatedCandidate,
+        captionSource,
+        learningSentences,
+      );
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      if (caught instanceof CaptionSourceParseError) {
+        offerManualFallback(
+          `自动获取的 Caption Source 解析失败：${caught.message}`,
+          validatedCandidate,
+        );
+        return;
+      }
+      if (persistenceStarted) {
+        failImport("保存失败，没有创建任何 Study Video。请检查浏览器本地数据权限。");
+      } else {
+        offerManualFallback(
+          "自动字幕服务连接中断或返回异常。你可以重试或上传 VTT/SRT 文件。",
+          validatedCandidate,
+        );
+      }
+    }
+  };
+
+  const continueWithManualCaption = async () => {
+    const candidate = manualFallback;
+    resetError();
+    if (!candidate) return;
+
+    if (!captionFile) {
+      offerManualFallback(
+        "请选择一个 .vtt 或 .srt 格式的 Caption Source。",
+        candidate,
+      );
+      return;
+    }
+
+    if (
+      captionFile.type &&
+      !SUPPORTED_CAPTION_CONTENT_TYPES.has(captionFile.type.toLowerCase())
+    ) {
+      offerManualFallback(
+        `文件内容类型 ${captionFile.type} 不受支持，请选择有效的 VTT 或 SRT 文本。`,
+        candidate,
+      );
+      return;
+    }
+
+    importActiveRef.current = true;
+    let persistenceStarted = false;
+    try {
+      await paintImportStage("parsing-captions");
+      const captionSource = parseLearnerCaptionSource(
+        captionSourceIdFor(candidate.metadata.videoId),
+        captionFile.name,
+        await captionFile.text(),
+      );
+      await paintImportStage("generating-sentences");
+      const learningSentences = learningSentencesFromCues(captionSource);
+      persistenceStarted = true;
+      await persistStudyVideo(candidate, captionSource, learningSentences);
+    } catch (caught) {
+      if (caught instanceof CaptionSourceParseError) {
+        offerManualFallback(caught.message, candidate);
+        return;
+      }
+      if (persistenceStarted) {
+        failImport("保存失败，没有创建任何 Study Video。请检查浏览器本地数据权限。");
+      } else {
+        offerManualFallback(
+          "无法读取这个 Caption Source。请重新选择有效的 VTT/SRT 文件。",
+          candidate,
+        );
+      }
     }
   };
 
@@ -276,21 +442,27 @@ export function useStudyVideoImport() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setPendingImport(null);
+    setManualFallback(null);
+    setCaptionFile(null);
     setStage("idle");
+    setLastProgressStage(null);
     resetError();
   };
 
   const importing = stage !== "idle" && stage !== "error";
   const progressMessage = importing
-    ? STAGE_COPY[stage as Exclude<ImportStage, "idle" | "error">]
+    ? STAGE_COPY[stage as ImportProgressStage]
     : null;
 
   return {
     cancelImport,
+    continueWithManualCaption,
     error,
     finishImport,
     handlePlayerError,
     importing,
+    lastProgressStage,
+    manualFallbackAvailable: manualFallback !== null,
     pendingImport,
     persistenceStatus,
     progressMessage,

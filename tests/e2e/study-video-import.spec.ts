@@ -117,21 +117,200 @@ async function submitStudyVideoImport(
     contents?: string;
     fileName?: string;
     mimeType?: string;
+    uploadCaption?: boolean;
     videoUrl?: string;
   } = {},
 ) {
+  const uploadCaption = fixture.uploadCaption ?? true;
   await page.goto("/");
   await page.getByRole("button", { name: "导入视频" }).click();
   await page
     .getByLabel("YouTube 视频链接")
-    .fill(fixture.videoUrl ?? VALID_VIDEO_URL);
-  await page.getByLabel("Caption Source 文件").setInputFiles({
-    name: fixture.fileName ?? "interview.vtt",
-    mimeType: fixture.mimeType ?? "text/vtt",
-    buffer: Buffer.from(fixture.contents ?? CAPTION_SOURCE),
-  });
+    .fill(
+      fixture.videoUrl ??
+        (uploadCaption ? "https://youtu.be/nocaptions1" : VALID_VIDEO_URL),
+    );
   await page.getByRole("button", { name: "开始导入" }).click();
+
+  if (uploadCaption) {
+    await page.getByLabel("Caption Source 文件").setInputFiles({
+      name: fixture.fileName ?? "interview.vtt",
+      mimeType: fixture.mimeType ?? "text/vtt",
+      buffer: Buffer.from(fixture.contents ?? CAPTION_SOURCE),
+    });
+    await page.getByRole("button", { name: "使用字幕文件继续" }).click();
+  }
 }
+
+test("learner starts automatic caption import with only a YouTube URL", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+
+  await expect(page.getByLabel("Caption Source 文件")).toHaveCount(0);
+  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "The Daily American Interview" }),
+  ).toBeVisible();
+  await expect(page.getByText("Welcome to the show.")).toBeVisible();
+  await expect(page.getByText("Manual captions", { exact: true })).toBeVisible();
+});
+
+test("automatic English captions are used when manual captions are absent", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/autocaps001");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(page.getByText("Practice with automatic captions.")).toBeVisible();
+  await expect(
+    page.getByText("Auto-generated captions", { exact: true }),
+  ).toBeVisible();
+});
+
+test("manual Caption Source is offered only after automatic acquisition fails", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/nocaptions1");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "没有找到可用的英文字幕" }),
+  ).toBeVisible();
+  await page.getByLabel("Caption Source 文件").setInputFiles({
+    name: "fallback.vtt",
+    mimeType: "text/vtt",
+    buffer: Buffer.from(CAPTION_SOURCE),
+  });
+  await page.getByRole("button", { name: "使用字幕文件继续" }).click();
+
+  await expect(page.getByText("Welcome to the show.")).toBeVisible();
+  await expect(
+    page.getByText("学习者提供的 Caption Source · VTT", { exact: true }),
+  ).toBeVisible();
+});
+
+test("import exposes every required processing stage", async ({ page }) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/slowvideo01");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(page.getByText("正在读取视频信息…")).toBeVisible();
+  const stages = page.getByRole("list", { name: "导入阶段" });
+  await expect(stages).toContainText("读取元数据");
+  await expect(stages).toContainText("检查可嵌入性");
+  await expect(stages).toContainText("获取字幕");
+  await expect(stages).toContainText("解析字幕");
+  await expect(stages).toContainText("生成学习句");
+  await expect(stages).toContainText("保存");
+
+  await page.getByRole("button", { name: "取消导入" }).click();
+});
+
+test("yt-dlp failure identifies the caption stage and offers file fallback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/failure0001");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "yt-dlp 获取字幕失败" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "导入阶段" }).locator("li.failed"),
+  ).toContainText("获取字幕");
+});
+
+test("caption acquisition timeout offers manual VTT or SRT fallback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("http://127.0.0.1:3103/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/timeout0001");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "自动获取英文字幕超时" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+});
+
+test("missing yt-dlp offers installation guidance and file fallback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("http://127.0.0.1:3102/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "本机未找到 yt-dlp" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+});
+
+test("caption endpoint rejects unvalidated identifiers before invoking yt-dlp", async ({
+  request,
+}) => {
+  const response = await request.post("/api/youtube/captions", {
+    data: { videoId: "dQw4w9WgXcQ;unexpected-shell-input" },
+  });
+
+  expect(response.status()).toBe(400);
+  await expect(response.json()).resolves.toMatchObject({
+    error: "视频标识无效。",
+  });
+});
+
+test("canceling slow caption extraction leaves no partial Study Video", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/slowcap0001");
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByText("正在通过非官方 yt-dlp 获取英文字幕…"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "取消导入" }).click();
+  await page.waitForTimeout(800);
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+  await expect(page.getByRole("button", { name: "导入视频" })).toBeEnabled();
+});
 
 test("learner imports a Study Video with a VTT Caption Source", async ({
   page,
@@ -360,6 +539,7 @@ test("learner gets a localized error for a malformed Caption Source block", asyn
 This cue must not be silently dropped.
 `;
 
+  await installYouTubePlayerBoundary(page, { duration: 74 });
   await submitStudyVideoImport(page, {
     contents: partiallyMalformedCaptionSource,
     fileName: "partially-malformed.vtt",
@@ -406,6 +586,7 @@ test("learner is given a supported URL example for an invalid URL", async ({
   page,
 }) => {
   await submitStudyVideoImport(page, {
+    uploadCaption: false,
     videoUrl: "https://www.youtube.com/playlist?list=not-a-video",
   });
 
@@ -420,7 +601,10 @@ test("learner is given a supported URL example for an invalid URL", async ({
 test("syntactically invalid URL receives the app's Chinese guidance", async ({
   page,
 }) => {
-  await submitStudyVideoImport(page, { videoUrl: "not a url" });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "not a url",
+  });
 
   await expect(
     page.getByRole("alert").filter({ hasText: "请输入完整的 YouTube 视频链接" }),
@@ -434,6 +618,7 @@ test("out-of-range timestamps are rejected", async ({ page }) => {
 This timestamp is not valid.
 `;
 
+  await installYouTubePlayerBoundary(page, { duration: 74 });
   await submitStudyVideoImport(page, {
     contents: malformedTimestampSource,
     fileName: "invalid-time.vtt",
@@ -451,6 +636,7 @@ test("an invalid WEBVTT signature is rejected", async ({ page }) => {
 This is not a valid WebVTT file.
 `;
 
+  await installYouTubePlayerBoundary(page, { duration: 74 });
   await submitStudyVideoImport(page, {
     contents: invalidSignatureSource,
     fileName: "invalid-signature.vtt",
@@ -467,6 +653,7 @@ test("SRT timestamps must include hours", async ({ page }) => {
 SRT needs an hours field.
 `;
 
+  await installYouTubePlayerBoundary(page, { duration: 74 });
   await submitStudyVideoImport(page, {
     contents: hourlessSrtSource,
     fileName: "hourless.srt",
@@ -482,7 +669,7 @@ test("non-embeddable video is rejected without a partial Study Video", async ({
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 74, errorCode: 101 });
-  await submitStudyVideoImport(page);
+  await submitStudyVideoImport(page, { uploadCaption: false });
 
   await expect(
     page
@@ -497,7 +684,7 @@ test("video over three hours is rejected without a partial Study Video", async (
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 10_801 });
-  await submitStudyVideoImport(page);
+  await submitStudyVideoImport(page, { uploadCaption: false });
 
   await expect(
     page.getByRole("alert").filter({ hasText: "视频超过 3 小时" }),
@@ -508,6 +695,7 @@ test("video over three hours is rejected without a partial Study Video", async (
 test("canceling a slow import leaves no partial Study Video", async ({ page }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
   await submitStudyVideoImport(page, {
+    uploadCaption: false,
     videoUrl: "https://youtu.be/slowvideo01",
   });
 

@@ -86,6 +86,12 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     );
   };
 
+  const captionSourceLabel = {
+    "auto-generated": "Auto-generated captions",
+    "learner-supplied": `学习者提供的 Caption Source · ${studyVideo.captionSource.format.toUpperCase()}`,
+    manual: "Manual captions",
+  }[studyVideo.captionSource.kind];
+
   return (
     <main className="study-page" id="main-content">
       <header className="study-header">
@@ -122,7 +128,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             </p>
           ) : null}
           <div className="caption-source-badge">
-            学习者提供的 Caption Source · {studyVideo.captionSource.format.toUpperCase()}
+            {captionSourceLabel}
           </div>
         </section>
 

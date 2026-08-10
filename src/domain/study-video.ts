@@ -1,4 +1,8 @@
 export type CaptionFormat = "srt" | "vtt";
+export type CaptionSourceKind =
+  | "auto-generated"
+  | "learner-supplied"
+  | "manual";
 
 declare const captionCueIdBrand: unique symbol;
 declare const captionSourceIdBrand: unique symbol;
@@ -49,7 +53,7 @@ export type CaptionCue = {
 
 export type CaptionSource = {
   id: CaptionSourceId;
-  kind: "learner-supplied";
+  kind: CaptionSourceKind;
   format: CaptionFormat;
   fileName: string;
   cues: CaptionCue[];

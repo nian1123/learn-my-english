@@ -9,6 +9,7 @@ import type {
   CaptionFormat,
   CaptionSource,
   CaptionSourceId,
+  CaptionSourceKind,
   LearningSentence,
 } from "./study-video";
 import {
@@ -270,6 +271,15 @@ export function parseLearnerCaptionSource(
   fileName: string,
   contents: string,
 ): CaptionSource {
+  return parseCaptionSource(id, fileName, contents, "learner-supplied");
+}
+
+export function parseCaptionSource(
+  id: CaptionSourceId,
+  fileName: string,
+  contents: string,
+  kind: CaptionSourceKind,
+): CaptionSource {
   const format = formatForFileName(fileName);
   const normalized = contents.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 
@@ -301,7 +311,7 @@ export function parseLearnerCaptionSource(
 
   return {
     id,
-    kind: "learner-supplied",
+    kind,
     format,
     fileName,
     cues,

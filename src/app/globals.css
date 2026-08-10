@@ -890,6 +890,65 @@ footer {
   line-height: 1.55;
 }
 
+.import-provider-note {
+  margin: 0;
+  padding: 13px 15px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(9, 15, 27, 0.58);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.import-stage-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.import-stage-list li {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.import-stage-list li::before {
+  height: 2px;
+  border-radius: 99px;
+  background: var(--line);
+  content: "";
+}
+
+.import-stage-list li > span {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+}
+
+.import-stage-list li.complete,
+.import-stage-list li.current {
+  color: var(--text-soft);
+}
+
+.import-stage-list li.complete::before,
+.import-stage-list li.current::before {
+  background: var(--accent);
+}
+
+.import-stage-list li.failed {
+  color: #ffc4bd;
+}
+
+.import-stage-list li.failed::before {
+  background: #f18c82;
+}
+
 .import-progress {
   display: flex;
   gap: 11px;

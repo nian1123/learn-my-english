@@ -116,13 +116,14 @@ export function StudyLibraryList() {
             <p className="empty-kicker">START WITH ONE INTERVIEW</p>
             <h3>还没有学习视频</h3>
             <p>
-              选择一段你真的想听懂的公开 YouTube 访谈，再准备英文 VTT 或 SRT
-              字幕。导入完成后，它会一直留在这台浏览器里。
+              选择一段你真的想听懂的公开 YouTube
+              访谈。应用会先尝试获取已有英文字幕；如果失败，再上传 VTT 或 SRT
+              文件继续。
             </p>
             <ul>
               <li>普通点播视频，时长不超过 3 小时</li>
               <li>视频允许嵌入播放</li>
-              <li>英文 Caption Source 可定位到时间</li>
+              <li>无可用字幕时可上传英文 VTT/SRT</li>
             </ul>
           </div>
         </div>

@@ -27,10 +27,15 @@ const unconfiguredAiEnvironment = {
 function applicationServer(
   port: number,
   aiEnvironment: Record<string, string>,
+  providerEnvironment: Record<string, string> = {},
 ) {
   return {
     command: `npm run start -- --hostname 127.0.0.1 --port ${port}`,
-    env: { ...externalProviderEnvironment, ...aiEnvironment },
+    env: {
+      ...externalProviderEnvironment,
+      ...providerEnvironment,
+      ...aiEnvironment,
+    },
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 30_000,
@@ -70,5 +75,11 @@ export default defineConfig({
     },
     applicationServer(3100, configuredAiEnvironment),
     applicationServer(3101, unconfiguredAiEnvironment),
+    applicationServer(3102, configuredAiEnvironment, {
+      YT_DLP_PATH: "./tests/fixtures/missing-yt-dlp",
+    }),
+    applicationServer(3103, configuredAiEnvironment, {
+      CAPTION_PROVIDER_TIMEOUT_MS: "500",
+    }),
   ],
 });
