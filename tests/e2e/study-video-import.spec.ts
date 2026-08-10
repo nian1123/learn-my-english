@@ -190,6 +190,9 @@ to the show.
 
 00:00:07.000 --> 00:00:08.000
 Next thought
+
+00:00:12.000 --> 00:00:16.000
+One cue can contain a sentence. It can contain another one!
 `;
 
   await installYouTubePlayerBoundary(page, { duration: 74 });
@@ -200,7 +203,9 @@ Next thought
 
   await expect(page.getByText("Welcome to the show.")).toBeVisible();
   await expect(page.getByText("Next thought")).toBeVisible();
-  await expect(page.getByText("2 句")).toBeVisible();
+  await expect(page.getByText("One cue can contain a sentence.")).toBeVisible();
+  await expect(page.getByText("It can contain another one!")).toBeVisible();
+  await expect(page.getByText("4 句")).toBeVisible();
 });
 
 test("learner is warned when the Caption Source content type is unsupported", async ({

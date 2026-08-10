@@ -15,6 +15,7 @@ const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
 const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
+const SENTENCE_BOUNDARY_PATTERN = /[.!?]["'”’)\]}]*(?=\s|$)/g;
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -53,6 +54,25 @@ function cleanCueText(lines: string[]): string {
     .replace(/<[^>]*>/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function splitCueText(text: string): string[] {
+  const fragments: string[] = [];
+  let fragmentStart = 0;
+
+  for (const boundary of text.matchAll(SENTENCE_BOUNDARY_PATTERN)) {
+    const boundaryStart = boundary.index;
+    if (boundaryStart === undefined) continue;
+
+    const fragmentEnd = boundaryStart + boundary[0].length;
+    const fragment = text.slice(fragmentStart, fragmentEnd).trim();
+    if (fragment) fragments.push(fragment);
+    fragmentStart = fragmentEnd;
+  }
+
+  const remainder = text.slice(fragmentStart).trim();
+  if (remainder) fragments.push(remainder);
+  return fragments;
 }
 
 function cueFromBlock(
@@ -146,34 +166,39 @@ export function parseLearnerCaptionSource(
 export function learningSentencesFromCues(
   captionSource: CaptionSource,
 ): LearningSentence[] {
+  const captionFragments = captionSource.cues.flatMap((cue) =>
+    splitCueText(cue.text).map((text) => ({ cue, text })),
+  );
   const sentences: LearningSentence[] = [];
-  let sentenceCues: CaptionCue[] = [];
+  let sentenceFragments: typeof captionFragments = [];
 
   const finishSentence = () => {
-    const firstCue = sentenceCues[0];
-    const lastCue = sentenceCues.at(-1);
-    if (!firstCue || !lastCue) return;
+    const firstFragment = sentenceFragments[0];
+    const lastFragment = sentenceFragments.at(-1);
+    if (!firstFragment || !lastFragment) return;
 
     sentences.push({
       id: learningSentenceIdForIndex(sentences.length),
       captionSourceId: captionSource.id,
-      sourceCueIds: sentenceCues.map((cue) => cue.id),
-      startSeconds: firstCue.startSeconds,
-      endSeconds: lastCue.endSeconds,
-      text: sentenceCues.map((cue) => cue.text).join(" "),
+      sourceCueIds: [
+        ...new Set(sentenceFragments.map(({ cue }) => cue.id)),
+      ],
+      startSeconds: firstFragment.cue.startSeconds,
+      endSeconds: lastFragment.cue.endSeconds,
+      text: sentenceFragments.map(({ text }) => text).join(" "),
     });
-    sentenceCues = [];
+    sentenceFragments = [];
   };
 
-  captionSource.cues.forEach((cue, index) => {
-    sentenceCues.push(cue);
-    const nextCue = captionSource.cues[index + 1];
-    const gapToNextCue = nextCue
-      ? nextCue.startSeconds - cue.endSeconds
+  captionFragments.forEach((fragment, index) => {
+    sentenceFragments.push(fragment);
+    const nextFragment = captionFragments[index + 1];
+    const gapToNextCue = nextFragment
+      ? nextFragment.cue.startSeconds - fragment.cue.endSeconds
       : Number.POSITIVE_INFINITY;
 
     if (
-      TERMINAL_PUNCTUATION_PATTERN.test(cue.text) ||
+      TERMINAL_PUNCTUATION_PATTERN.test(fragment.text) ||
       gapToNextCue >= MAXIMUM_SENTENCE_GAP_SECONDS
     ) {
       finishSentence();

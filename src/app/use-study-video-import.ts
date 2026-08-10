@@ -41,7 +41,6 @@ type ImportStage =
   | "idle"
   | "reading-metadata"
   | "checking-embed"
-  | "generating"
   | "saving"
   | "error";
 
@@ -54,7 +53,6 @@ export type PendingStudyVideoImport = {
 const STAGE_COPY: Record<Exclude<ImportStage, "idle" | "error">, string> = {
   "reading-metadata": "正在读取视频信息…",
   "checking-embed": "正在检查视频是否可嵌入…",
-  generating: "正在生成基础 Learning Sentences…",
   saving: "正在保存到学习库…",
 };
 
@@ -234,7 +232,6 @@ export function useStudyVideoImport() {
     }
 
     try {
-      setStage("generating");
       const studyVideoId = studyVideoIdFor(candidate.metadata.videoId);
       setStage("saving");
       await saveStudyVideo({
