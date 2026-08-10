@@ -7,8 +7,14 @@ test("learner can open an empty Study Library and inspect readiness", async ({ p
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "我的学习库" })).toBeVisible();
-  await expect(page.getByLabel("YouTube 视频链接")).toBeVisible();
   await expect(page.getByText("还没有学习视频")).toBeVisible();
+
+  await expect(page.getByLabel("YouTube 视频链接")).toHaveCount(0);
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await expect(page.getByRole("dialog", { name: "导入 Study Video" })).toBeVisible();
+  await expect(page.getByLabel("YouTube 视频链接")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "导入 Study Video" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "设置与诊断" }).click();
 
@@ -18,6 +24,8 @@ test("learner can open an empty Study Library and inspect readiness", async ({ p
   await expect(page.getByText("DeepSeek", { exact: true })).toBeVisible();
   await expect(page.getByText("基础词典", { exact: true })).toBeVisible();
   await expect(page.getByText("本地数据", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "运行状态" })).toHaveCount(0);
 });
 
 test("runtime readiness uses provider boundaries without exposing credentials", async ({
@@ -44,7 +52,9 @@ test("missing optional AI does not block the Study Library", async ({ page }) =>
   await page.goto("http://127.0.0.1:3101/");
 
   await expect(page.getByRole("heading", { name: "我的学习库" })).toBeVisible();
+  await page.getByRole("button", { name: "导入视频" }).click();
   await expect(page.getByLabel("YouTube 视频链接")).toBeEnabled();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "设置与诊断" }).click();
 
@@ -89,7 +99,7 @@ test("learner sees a blocking error when local data is unavailable", async ({
       .getByRole("alert")
       .filter({ hasText: "本地数据不可用，暂时不能保存学习内容" }),
   ).toBeVisible();
-  await expect(page.getByLabel("YouTube 视频链接")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "导入视频" })).toBeDisabled();
 
   await page.getByRole("button", { name: "设置与诊断" }).click();
   await expect(page.getByText("本地数据不可用，无法保存偏好")).toBeVisible();

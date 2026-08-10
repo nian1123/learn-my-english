@@ -65,12 +65,12 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
   }, [studyVideoId]);
 
   if (loading) {
-    return <main className="study-loading">正在打开 Study Video…</main>;
+    return <main className="study-loading" id="main-content">正在打开 Study Video…</main>;
   }
 
   if (loadFailed || !studyVideo) {
     return (
-      <main className="study-loading">
+      <main className="study-loading" id="main-content">
         <h1>找不到这个 Study Video</h1>
         <p>本地数据可能已被清除，或链接已经失效。</p>
         <Link href="/">返回学习库</Link>
@@ -87,7 +87,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
   };
 
   return (
-    <main className="study-page">
+    <main className="study-page" id="main-content">
       <header className="study-header">
         <Link href="/">← 返回学习库</Link>
         <div>

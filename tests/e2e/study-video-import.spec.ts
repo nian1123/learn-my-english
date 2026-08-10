@@ -121,6 +121,7 @@ async function submitStudyVideoImport(
   } = {},
 ) {
   await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
   await page
     .getByLabel("YouTube 视频链接")
     .fill(fixture.videoUrl ?? VALID_VIDEO_URL);
@@ -129,7 +130,7 @@ async function submitStudyVideoImport(
     mimeType: fixture.mimeType ?? "text/vtt",
     buffer: Buffer.from(fixture.contents ?? CAPTION_SOURCE),
   });
-  await page.getByRole("button", { name: "导入视频" }).click();
+  await page.getByRole("button", { name: "开始导入" }).click();
 }
 
 test("learner imports a Study Video with a VTT Caption Source", async ({
@@ -175,6 +176,10 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
   await expect(page.getByText("Everyday Voices")).toBeVisible();
   await expect(page.getByText("1:14")).toBeVisible();
   await expect(page.getByText("上次位置 0:11")).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "学习进度" })).toHaveAttribute(
+    "value",
+    "15",
+  );
 });
 
 test("caption fragments become punctuation and three-second Learning Sentences", async ({

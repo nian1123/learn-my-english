@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   RuntimeCapability,
@@ -52,6 +52,7 @@ const STATUS_COPY: Record<RuntimeStatus | "checking", string> = {
 };
 
 function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const {
     persistenceStatus,
     preferences,
@@ -60,6 +61,17 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   } = useStudyLibraryClient();
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostic[]>([]);
   const [requestFailed, setRequestFailed] = useState(false);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    dialog.showModal();
+
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -94,13 +106,19 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation">
-      <section
-        aria-labelledby="diagnostics-title"
-        aria-modal="true"
-        className="diagnostics-panel"
-        role="dialog"
-      >
+    <dialog
+      aria-labelledby="diagnostics-title"
+      className="diagnostics-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      ref={dialogRef}
+    >
+      <section className="diagnostics-panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">LOCAL READINESS</p>
@@ -168,7 +186,7 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
           AI 未配置不会阻止听力学习；本地数据不可用时，应用将停止写入。
         </div>
       </section>
-    </div>
+    </dialog>
   );
 }
 
@@ -182,8 +200,11 @@ export function SettingsAndDiagnostics() {
         onClick={() => setShowDiagnostics(true)}
         type="button"
       >
-        <span aria-hidden="true">●</span>
-        设置与诊断
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Z" />
+          <path d="m19 13.5 1.4 1.1-2 3.5-1.8-.7a7.5 7.5 0 0 1-2.3 1.3L14 20.6h-4l-.3-1.9a7.5 7.5 0 0 1-2.3-1.3l-1.8.7-2-3.5L5 13.5a7.4 7.4 0 0 1 0-3L3.6 9.4l2-3.5 1.8.7a7.5 7.5 0 0 1 2.3-1.3l.3-1.9h4l.3 1.9a7.5 7.5 0 0 1 2.3 1.3l1.8-.7 2 3.5-1.4 1.1a7.4 7.4 0 0 1 0 3Z" />
+        </svg>
+        <span>设置与诊断</span>
       </button>
       {showDiagnostics ? (
         <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />
