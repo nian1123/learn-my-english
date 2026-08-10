@@ -1,4 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+const diagnosticRow = (page: Page, label: string) =>
+  page.locator(".diagnostic-row").filter({ hasText: label });
 
 test("learner can open an empty Study Library and inspect readiness", async ({ page }) => {
   await page.goto("/");
@@ -23,14 +26,11 @@ test("runtime readiness uses provider boundaries without exposing credentials", 
   await page.goto("/");
   await page.getByRole("button", { name: "设置与诊断" }).click();
 
-  const diagnosticRow = (label: string) =>
-    page.locator(".diagnostic-row").filter({ hasText: label });
-
-  await expect(diagnosticRow("yt-dlp")).toContainText("可用");
-  await expect(diagnosticRow("本地 AI")).toContainText("已配置");
-  await expect(diagnosticRow("DeepSeek")).toContainText("已配置");
-  await expect(diagnosticRow("基础词典")).toContainText("可用");
-  await expect(diagnosticRow("本地数据")).toContainText("可用");
+  await expect(diagnosticRow(page, "yt-dlp")).toContainText("可用");
+  await expect(diagnosticRow(page, "本地 AI")).toContainText("已配置");
+  await expect(diagnosticRow(page, "DeepSeek")).toContainText("已配置");
+  await expect(diagnosticRow(page, "基础词典")).toContainText("可用");
+  await expect(diagnosticRow(page, "本地数据")).toContainText("可用");
 
   const diagnosticResponse = await page.evaluate(async () =>
     fetch("/api/diagnostics").then((response) => response.text()),
@@ -38,6 +38,21 @@ test("runtime readiness uses provider boundaries without exposing credentials", 
 
   expect(diagnosticResponse).not.toContain("e2e-local-secret");
   expect(diagnosticResponse).not.toContain("e2e-deepseek-secret");
+});
+
+test("missing optional AI does not block the Study Library", async ({ page }) => {
+  await page.goto("http://127.0.0.1:3101/");
+
+  await expect(page.getByRole("heading", { name: "我的学习库" })).toBeVisible();
+  await expect(page.getByLabel("YouTube 视频链接")).toBeEnabled();
+
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  await expect(diagnosticRow(page, "本地 AI")).toContainText("未配置");
+  await expect(diagnosticRow(page, "DeepSeek")).toContainText("未配置");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "本地数据不可用" }),
+  ).toHaveCount(0);
 });
 
 test("learner preference survives a browser refresh", async ({ page }) => {

@@ -4,7 +4,7 @@
 
 ## 本地启动
 
-需要 Node.js 20.9 或更高版本、Google Chrome，以及用于自动字幕获取的 `yt-dlp`。
+需要 Node.js 20.9 或更高版本和 Google Chrome。`yt-dlp` 只用于尝试自动获取公开字幕：它是非官方、可能失效的可选集成，不影响应用启动。
 
 ```bash
 npm install
@@ -30,11 +30,14 @@ DEEPSEEK_MODEL=
 
 两套 AI 都未配置时，学习库仍可正常打开。服务端诊断只返回连接状态，不会把密钥发送给浏览器。
 
+## 字幕获取边界
+
+Study Video 始终通过 YouTube 官方嵌入播放器播放，应用不会下载或托管视频、音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是由学习者提供 `.vtt` 或 `.srt` 字幕文件。
+
 ## 验证
 
 ```bash
 npm run typecheck
-npx playwright install chromium
 npm test
 npm run build
 ```

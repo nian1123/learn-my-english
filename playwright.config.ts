@@ -14,20 +14,19 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "desktop-chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "desktop-chrome",
+      use: { ...devices["Desktop Chrome"], channel: "chrome" },
     },
   ],
   webServer: [
     {
       command: "node tests/fixtures/dictionary-provider.mjs",
       url: "http://127.0.0.1:4174/health",
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 10_000,
     },
     {
-      command:
-        "npm run build && npm run start -- --hostname 127.0.0.1 --port 3100",
+      command: "npm run start -- --hostname 127.0.0.1 --port 3100",
       env: {
         YT_DLP_PATH: "./tests/fixtures/yt-dlp",
         DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
@@ -39,8 +38,24 @@ export default defineConfig({
         DEEPSEEK_MODEL: "e2e-deepseek-model",
       },
       url: "http://127.0.0.1:3100",
-      reuseExistingServer: !process.env.CI,
-      timeout: 180_000,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      command: "npm run start -- --hostname 127.0.0.1 --port 3101",
+      env: {
+        YT_DLP_PATH: "./tests/fixtures/yt-dlp",
+        DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
+        OPENAI_BASE_URL: "",
+        OPENAI_API_KEY: "",
+        OPENAI_MODEL: "",
+        DEEPSEEK_BASE_URL: "",
+        DEEPSEEK_API_KEY: "",
+        DEEPSEEK_MODEL: "",
+      },
+      url: "http://127.0.0.1:3101",
+      reuseExistingServer: false,
+      timeout: 30_000,
     },
   ],
 });
