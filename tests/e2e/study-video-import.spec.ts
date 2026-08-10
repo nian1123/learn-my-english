@@ -172,6 +172,12 @@ test("automatic English captions are used when manual captions are absent", asyn
   await page.getByRole("button", { name: "开始导入" }).click();
 
   await expect(page.getByText("Practice with automatic captions.")).toBeVisible();
+  await expect(page.getByText("Next sentence.", { exact: true })).toBeVisible();
+  await expect(page.locator(".learning-sentence strong")).toHaveText([
+    "Practice with automatic captions.",
+    "Next sentence.",
+  ]);
+  await expect(page.getByText("2 句")).toBeVisible();
   await expect(
     page.getByText("Auto-generated captions", { exact: true }),
   ).toBeVisible();
@@ -511,6 +517,31 @@ a better listening tool.
       { method: "playVideo" },
       { method: "pauseVideo" },
     ]);
+});
+
+test("intentional repetition in adjacent full-length cues is preserved", async ({
+  page,
+}) => {
+  const repeatedCaptionSource = `WEBVTT
+
+00:00:01.000 --> 00:00:02.000
+Go.
+
+00:00:02.000 --> 00:00:03.000
+Go.
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: repeatedCaptionSource,
+    fileName: "intentional-repetition.vtt",
+  });
+
+  await expect(page.locator(".learning-sentence strong")).toHaveText([
+    "Go.",
+    "Go.",
+  ]);
+  await expect(page.getByText("2 句")).toBeVisible();
 });
 
 test("learner is warned when the Caption Source content type is unsupported", async ({

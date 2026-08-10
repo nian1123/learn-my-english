@@ -22,6 +22,7 @@ const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
 const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const MINIMUM_ROLLING_OVERLAP_CHARACTERS = 4;
+const MAXIMUM_ROLLING_SNAPSHOT_SECONDS = 0.05;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
 const ADDRESS_CONTEXT_PATTERN = String.raw`(?:\b\d{1,6}\s+|\b(?:[Aa]long|[Aa]t|[Dd]own|[Nn]ear|[Oo]n|[Oo]nto|[Pp]ast|[Rr]eached|[Tt]oward|[Tt]owards|[Uu]p)\s+)`;
 const STREET_NAME_PATTERN = String.raw`(?:[A-Z][A-Za-z'-]*\s+){1,4}`;
@@ -142,10 +143,20 @@ function normalizeRollingCues(cues: CaptionCue[]): CaptionCue[] {
 
   for (const cue of cues) {
     let overlapLength = 0;
-    if (
+    const previousDuration = previousRawCue
+      ? previousRawCue.endSeconds - previousRawCue.startSeconds
+      : Number.POSITIVE_INFINITY;
+    const cueDuration = cue.endSeconds - cue.startSeconds;
+    const overlapsPrevious =
       previousRawCue !== undefined &&
-      cue.startSeconds < previousRawCue.endSeconds
-    ) {
+      cue.startSeconds < previousRawCue.endSeconds;
+    const touchesRollingSnapshot =
+      previousRawCue !== undefined &&
+      cue.startSeconds === previousRawCue.endSeconds &&
+      Math.min(previousDuration, cueDuration) <=
+        MAXIMUM_ROLLING_SNAPSHOT_SECONDS;
+
+    if (previousRawCue && (overlapsPrevious || touchesRollingSnapshot)) {
       overlapLength = rollingOverlapLength(previousRawCue.text, cue.text);
     }
     const normalizedText = cue.text.slice(overlapLength).trimStart();

@@ -96,8 +96,18 @@ Language: en
 
 00:00:00.500 --> 00:00:01.000
 
-00:00:01.000 --> 00:00:04.000
+00:00:01.000 --> 00:00:03.000
+Practice<00:00:01.400><c> with</c><00:00:01.800><c> automatic</c><00:00:02.200><c> captions.</c>
+
+00:00:03.000 --> 00:00:03.010
 Practice with automatic captions.
+
+00:00:03.010 --> 00:00:05.000
+Practice with automatic captions.
+Next<00:00:03.400><c> sentence.</c>
+
+00:00:05.000 --> 00:00:05.010
+Next sentence.
 `,
   );
   process.exit(0);
