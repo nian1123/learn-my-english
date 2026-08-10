@@ -16,6 +16,27 @@ const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
 const SENTENCE_BOUNDARY_PATTERN = /[.!?]["'”’)\]}]*(?=\s|$)/g;
+const NON_TERMINAL_ABBREVIATIONS = new Set([
+  "capt.",
+  "col.",
+  "dr.",
+  "fr.",
+  "gen.",
+  "gov.",
+  "lt.",
+  "mr.",
+  "mrs.",
+  "ms.",
+  "mx.",
+  "pres.",
+  "prof.",
+  "rep.",
+  "rev.",
+  "sen.",
+  "sgt.",
+  "st.",
+  "vs.",
+]);
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -56,22 +77,56 @@ function cleanCueText(lines: string[]): string {
     .trim();
 }
 
-function splitCueText(text: string): string[] {
-  const fragments: string[] = [];
+type CueTextFragment = {
+  endRatio: number;
+  startRatio: number;
+  text: string;
+};
+
+function isNonTerminalAbbreviation(text: string, periodIndex: number): boolean {
+  if (text[periodIndex] !== ".") return false;
+
+  const token = text
+    .slice(0, periodIndex + 1)
+    .match(/([A-Za-z][A-Za-z.]*)\.$/)?.[0];
+  if (!token) return false;
+
+  return (
+    NON_TERMINAL_ABBREVIATIONS.has(token.toLowerCase()) ||
+    /^[A-Z]\.$/.test(token) ||
+    /^(?:[A-Za-z]\.){2,}$/.test(token)
+  );
+}
+
+function splitCueText(text: string): CueTextFragment[] {
+  const fragments: CueTextFragment[] = [];
   let fragmentStart = 0;
 
   for (const boundary of text.matchAll(SENTENCE_BOUNDARY_PATTERN)) {
     const boundaryStart = boundary.index;
     if (boundaryStart === undefined) continue;
+    if (isNonTerminalAbbreviation(text, boundaryStart)) continue;
 
     const fragmentEnd = boundaryStart + boundary[0].length;
     const fragment = text.slice(fragmentStart, fragmentEnd).trim();
-    if (fragment) fragments.push(fragment);
+    if (fragment) {
+      fragments.push({
+        endRatio: fragmentEnd / text.length,
+        startRatio: fragmentStart / text.length,
+        text: fragment,
+      });
+    }
     fragmentStart = fragmentEnd;
   }
 
   const remainder = text.slice(fragmentStart).trim();
-  if (remainder) fragments.push(remainder);
+  if (remainder) {
+    fragments.push({
+      endRatio: 1,
+      startRatio: fragmentStart / text.length,
+      text: remainder,
+    });
+  }
   return fragments;
 }
 
@@ -167,7 +222,15 @@ export function learningSentencesFromCues(
   captionSource: CaptionSource,
 ): LearningSentence[] {
   const captionFragments = captionSource.cues.flatMap((cue) =>
-    splitCueText(cue.text).map((text) => ({ cue, text })),
+    splitCueText(cue.text).map((fragment) => {
+      const cueDuration = cue.endSeconds - cue.startSeconds;
+      return {
+        cue,
+        endSeconds: cue.startSeconds + cueDuration * fragment.endRatio,
+        startSeconds: cue.startSeconds + cueDuration * fragment.startRatio,
+        text: fragment.text,
+      };
+    }),
   );
   const sentences: LearningSentence[] = [];
   let sentenceFragments: typeof captionFragments = [];
@@ -183,8 +246,8 @@ export function learningSentencesFromCues(
       sourceCueIds: [
         ...new Set(sentenceFragments.map(({ cue }) => cue.id)),
       ],
-      startSeconds: firstFragment.cue.startSeconds,
-      endSeconds: lastFragment.cue.endSeconds,
+      startSeconds: firstFragment.startSeconds,
+      endSeconds: lastFragment.endSeconds,
       text: sentenceFragments.map(({ text }) => text).join(" "),
     });
     sentenceFragments = [];
@@ -194,7 +257,7 @@ export function learningSentencesFromCues(
     sentenceFragments.push(fragment);
     const nextFragment = captionFragments[index + 1];
     const gapToNextCue = nextFragment
-      ? nextFragment.cue.startSeconds - fragment.cue.endSeconds
+      ? nextFragment.startSeconds - fragment.endSeconds
       : Number.POSITIVE_INFINITY;
 
     if (

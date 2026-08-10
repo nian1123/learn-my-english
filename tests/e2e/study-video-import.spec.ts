@@ -193,6 +193,9 @@ Next thought
 
 00:00:12.000 --> 00:00:16.000
 One cue can contain a sentence. It can contain another one!
+
+00:00:18.000 --> 00:00:20.000
+Dr. Smith spoke.
 `;
 
   await installYouTubePlayerBoundary(page, { duration: 74 });
@@ -205,7 +208,31 @@ One cue can contain a sentence. It can contain another one!
   await expect(page.getByText("Next thought")).toBeVisible();
   await expect(page.getByText("One cue can contain a sentence.")).toBeVisible();
   await expect(page.getByText("It can contain another one!")).toBeVisible();
-  await expect(page.getByText("4 句")).toBeVisible();
+  await expect(page.getByText("Dr. Smith spoke.", { exact: true })).toBeVisible();
+  await expect(page.getByText("5 句")).toBeVisible();
+
+  await page.getByRole("button", { name: "播放第 3 句" }).click();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(15));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 12 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+
+  await page.getByRole("button", { name: "播放第 4 句" }).click();
+  const playerCalls = await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls"),
+  );
+  expect(playerCalls[0].method).toBe("seekTo");
+  expect(playerCalls[0].seconds).toBeGreaterThan(12);
+  expect(playerCalls[0].seconds).toBeLessThan(16);
 });
 
 test("learner is warned when the Caption Source content type is unsupported", async ({
