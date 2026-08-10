@@ -201,7 +201,7 @@ Dr. Smith spoke.
 I live in the U.S. It is large.
 
 00:00:26.000 --> 00:00:28.000
-We reached Main St. Then we left.
+We reached Main St. Traffic was heavy.
 
 00:00:30.000 --> 00:00:32.000
 The U.S. Government spoke.
@@ -221,7 +221,7 @@ The U.S. Government spoke.
   await expect(page.getByText("I live in the U.S.", { exact: true })).toBeVisible();
   await expect(page.getByText("It is large.", { exact: true })).toBeVisible();
   await expect(page.getByText("We reached Main St.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Then we left.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Traffic was heavy.", { exact: true })).toBeVisible();
   await expect(
     page.getByText("The U.S. Government spoke.", { exact: true }),
   ).toBeVisible();

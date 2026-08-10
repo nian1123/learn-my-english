@@ -1,3 +1,9 @@
+import {
+  SentenceSplitterSyntax,
+  split,
+  type TxtSentenceNode,
+} from "sentence-splitter";
+
 import type {
   CaptionCue,
   CaptionFormat,
@@ -15,66 +21,8 @@ const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
 const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
-const SENTENCE_BOUNDARY_PATTERN = /[.!?]["'”’)\]}]*(?=\s|$)/g;
-const NON_TERMINAL_ABBREVIATIONS = new Set([
-  "capt.",
-  "col.",
-  "dr.",
-  "fr.",
-  "gen.",
-  "gov.",
-  "lt.",
-  "mr.",
-  "mrs.",
-  "ms.",
-  "mx.",
-  "pres.",
-  "prof.",
-  "rep.",
-  "rev.",
-  "sen.",
-  "sgt.",
-  "st.",
-  "vs.",
-]);
-const ALWAYS_NON_TERMINAL_ABBREVIATIONS = new Set(["e.g.", "i.e.", "vs."]);
-const COMMON_SENTENCE_STARTERS = new Set([
-  "a",
-  "after",
-  "also",
-  "an",
-  "and",
-  "before",
-  "but",
-  "finally",
-  "he",
-  "here",
-  "however",
-  "i",
-  "it",
-  "meanwhile",
-  "next",
-  "now",
-  "she",
-  "so",
-  "still",
-  "that",
-  "the",
-  "then",
-  "there",
-  "these",
-  "they",
-  "this",
-  "those",
-  "we",
-  "what",
-  "when",
-  "where",
-  "who",
-  "why",
-  "yet",
-  "you",
-]);
+const ADDRESS_SUFFIX_BOUNDARY_PATTERN =
+  /\b[A-Z][A-Za-z'-]*\s+(?:Ave|Blvd|Dr|Ln|Rd|St)\.(?=\s+[A-Z])/g;
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -121,61 +69,55 @@ type CueTextFragment = {
   text: string;
 };
 
-function isNonTerminalAbbreviation(text: string, periodIndex: number): boolean {
-  if (text[periodIndex] !== ".") return false;
+function isSentenceNode(value: unknown): value is TxtSentenceNode {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === SentenceSplitterSyntax.Sentence
+  );
+}
 
-  const token = text
-    .slice(0, periodIndex + 1)
-    .match(/([A-Za-z][A-Za-z.]*)\.$/)?.[0];
-  if (!token) return false;
+type TextRange = {
+  end: number;
+  start: number;
+};
 
-  const abbreviation = token.toLowerCase();
-  const protectedToken =
-    NON_TERMINAL_ABBREVIATIONS.has(abbreviation) ||
-    /^[A-Z]\.$/.test(token) ||
-    /^(?:[A-Za-z]\.){2,}$/.test(token);
-  if (!protectedToken) return false;
-  if (ALWAYS_NON_TERMINAL_ABBREVIATIONS.has(abbreviation)) return true;
+function splitAddressSuffixBoundaries(
+  text: string,
+  sentenceRange: TextRange,
+): TextRange[] {
+  const ranges: TextRange[] = [];
+  const sentenceText = text.slice(sentenceRange.start, sentenceRange.end);
+  let rangeStart = sentenceRange.start;
 
-  const followingWord = text
-    .slice(periodIndex + 1)
-    .match(/^["'”’“‘()\[\]}\s]*([A-Za-z]+)/)?.[1];
-  if (!followingWord) return false;
-  if (followingWord[0] === followingWord[0]?.toLowerCase()) return true;
+  for (const match of sentenceText.matchAll(ADDRESS_SUFFIX_BOUNDARY_PATTERN)) {
+    if (match.index === undefined) continue;
+    const boundary = sentenceRange.start + match.index + match[0].length;
+    ranges.push({ start: rangeStart, end: boundary });
+    rangeStart = boundary;
+  }
 
-  return !COMMON_SENTENCE_STARTERS.has(followingWord.toLowerCase());
+  ranges.push({ start: rangeStart, end: sentenceRange.end });
+  return ranges;
 }
 
 function splitCueText(text: string): CueTextFragment[] {
-  const fragments: CueTextFragment[] = [];
-  let fragmentStart = 0;
+  const textRanges = split(text)
+    .filter(isSentenceNode)
+    .flatMap((sentence) =>
+      splitAddressSuffixBoundaries(text, {
+        start: sentence.range[0],
+        end: sentence.range[1],
+      }),
+    );
 
-  for (const boundary of text.matchAll(SENTENCE_BOUNDARY_PATTERN)) {
-    const boundaryStart = boundary.index;
-    if (boundaryStart === undefined) continue;
-    if (isNonTerminalAbbreviation(text, boundaryStart)) continue;
-
-    const fragmentEnd = boundaryStart + boundary[0].length;
-    const fragment = text.slice(fragmentStart, fragmentEnd).trim();
-    if (fragment) {
-      fragments.push({
-        endRatio: fragmentEnd / text.length,
-        startRatio: fragmentStart / text.length,
-        text: fragment,
-      });
-    }
-    fragmentStart = fragmentEnd;
-  }
-
-  const remainder = text.slice(fragmentStart).trim();
-  if (remainder) {
-    fragments.push({
-      endRatio: 1,
-      startRatio: fragmentStart / text.length,
-      text: remainder,
-    });
-  }
-  return fragments;
+  return textRanges.map((range, index) => ({
+    endRatio: index === textRanges.length - 1 ? 1 : range.end / text.length,
+    startRatio:
+      index === 0 ? 0 : (textRanges[index - 1]?.end ?? range.start) / text.length,
+    text: text.slice(range.start, range.end).trim(),
+  }));
 }
 
 function cueFromBlock(
