@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("2026.08.10-test\n");
+  process.exit(0);
+}
+
+process.stderr.write("This fixture only supports --version.\n");
+process.exit(1);

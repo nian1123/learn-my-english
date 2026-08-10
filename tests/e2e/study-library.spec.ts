@@ -1,0 +1,84 @@
+import { expect, test } from "@playwright/test";
+
+test("learner can open an empty Study Library and inspect readiness", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "我的学习库" })).toBeVisible();
+  await expect(page.getByLabel("YouTube 视频链接")).toBeVisible();
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  await expect(page.getByRole("heading", { name: "运行状态" })).toBeVisible();
+  await expect(page.getByText("yt-dlp", { exact: true })).toBeVisible();
+  await expect(page.getByText("本地 AI", { exact: true })).toBeVisible();
+  await expect(page.getByText("DeepSeek", { exact: true })).toBeVisible();
+  await expect(page.getByText("基础词典", { exact: true })).toBeVisible();
+  await expect(page.getByText("本地数据", { exact: true })).toBeVisible();
+});
+
+test("runtime readiness uses provider boundaries without exposing credentials", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  const diagnosticRow = (label: string) =>
+    page.locator(".diagnostic-row").filter({ hasText: label });
+
+  await expect(diagnosticRow("yt-dlp")).toContainText("可用");
+  await expect(diagnosticRow("本地 AI")).toContainText("已配置");
+  await expect(diagnosticRow("DeepSeek")).toContainText("已配置");
+  await expect(diagnosticRow("基础词典")).toContainText("可用");
+  await expect(diagnosticRow("本地数据")).toContainText("可用");
+
+  const diagnosticResponse = await page.evaluate(async () =>
+    fetch("/api/diagnostics").then((response) => response.text()),
+  );
+
+  expect(diagnosticResponse).not.toContain("e2e-local-secret");
+  expect(diagnosticResponse).not.toContain("e2e-deepseek-secret");
+});
+
+test("learner preference survives a browser refresh", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  const hideTranscript = page.getByRole("checkbox", {
+    name: "默认隐藏字幕",
+  });
+
+  await expect(hideTranscript).not.toBeChecked();
+  await hideTranscript.check();
+  await expect(page.getByText("偏好已保存")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await expect(hideTranscript).toBeChecked();
+});
+
+test("learner sees a blocking error when local data is unavailable", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "本地数据不可用，暂时不能保存学习内容" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("YouTube 视频链接")).toBeDisabled();
+
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await expect(page.getByText("本地数据不可用，无法保存偏好")).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "默认隐藏字幕" }),
+  ).toBeDisabled();
+});
