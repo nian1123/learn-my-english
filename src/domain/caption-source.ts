@@ -20,6 +20,7 @@ const TIMING_LINE_PATTERN = /^(\S+)\s+-->\s+(\S+)(?:\s+.*)?$/;
 const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
 const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
+const MINIMUM_ROLLING_OVERLAP_CHARACTERS = 4;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
 const ADDRESS_CONTEXT_PATTERN = String.raw`(?:\b\d{1,6}\s+|\b(?:[Aa]long|[Aa]t|[Dd]own|[Nn]ear|[Oo]n|[Oo]nto|[Pp]ast|[Rr]eached|[Tt]oward|[Tt]owards|[Uu]p)\s+)`;
 const STREET_NAME_PATTERN = String.raw`(?:[A-Z][A-Za-z'-]*\s+){1,4}`;
@@ -59,12 +60,101 @@ function timestampSeconds(value: string, format: CaptionFormat): number | null {
   return Number.isFinite(total) ? total : null;
 }
 
+function decodeCharacterReference(reference: string): string {
+  const namedReferences: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: '"',
+    lrm: "",
+    rlm: "",
+  };
+  const body = reference.slice(1, -1);
+  if (body in namedReferences) return namedReferences[body] ?? "";
+
+  const numericValue = body.startsWith("#x") || body.startsWith("#X")
+    ? Number.parseInt(body.slice(2), 16)
+    : body.startsWith("#")
+      ? Number.parseInt(body.slice(1), 10)
+      : Number.NaN;
+
+  if (
+    !Number.isInteger(numericValue) ||
+    numericValue < 0 ||
+    numericValue > 0x10ffff
+  ) {
+    return reference;
+  }
+
+  return String.fromCodePoint(numericValue);
+}
+
 function cleanCueText(lines: string[]): string {
   return lines
     .join(" ")
+    .replace(/\{\\[^}]*\}/g, "")
+    .replace(/<v(?:\.[^\s>]*)?\s+([^>]+)>/gi, (_, speaker: string) =>
+      `${speaker.trim()}: `,
+    )
+    .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]*>/g, "")
+    .replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, decodeCharacterReference)
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function rollingOverlapLength(previousText: string, currentText: string): number {
+  const maximumLength = Math.min(previousText.length, currentText.length);
+  const lowerPreviousText = previousText.toLocaleLowerCase("en-US");
+  const lowerCurrentText = currentText.toLocaleLowerCase("en-US");
+
+  for (
+    let length = maximumLength;
+    length >= MINIMUM_ROLLING_OVERLAP_CHARACTERS;
+    length -= 1
+  ) {
+    const previousStart = previousText.length - length;
+    const beginsAtWordBoundary =
+      previousStart === 0 || /[\s([{“‘]/.test(previousText[previousStart - 1] ?? "");
+    const endsAtWordBoundary =
+      length === currentText.length ||
+      /[\s,.;:!?\])}”’]/.test(currentText[length] ?? "");
+
+    if (
+      beginsAtWordBoundary &&
+      endsAtWordBoundary &&
+      lowerPreviousText.slice(previousStart) === lowerCurrentText.slice(0, length)
+    ) {
+      return length;
+    }
+  }
+
+  return 0;
+}
+
+function normalizeRollingCues(cues: CaptionCue[]): CaptionCue[] {
+  const normalizedCues: CaptionCue[] = [];
+  let previousRawCue: CaptionCue | undefined;
+
+  for (const cue of cues) {
+    let overlapLength = 0;
+    if (
+      previousRawCue !== undefined &&
+      cue.startSeconds < previousRawCue.endSeconds
+    ) {
+      overlapLength = rollingOverlapLength(previousRawCue.text, cue.text);
+    }
+    const normalizedText = cue.text.slice(overlapLength).trimStart();
+
+    previousRawCue = cue;
+    if (!normalizedText) continue;
+    normalizedCues.push({ ...cue, text: normalizedText });
+  }
+
+  return normalizedCues;
 }
 
 type CueTextFragment = {
@@ -191,11 +281,17 @@ export function parseLearnerCaptionSource(
   }
 
   const body = format === "vtt" ? remainingLines.join("\n") : normalized;
-  const cues = body
+  const parsedCues = body
     .split(/\n{2,}/)
     .map((block, index) => cueFromBlock(block, index, format))
     .filter((cue): cue is CaptionCue => cue !== null)
-    .sort((left, right) => left.startSeconds - right.startSeconds);
+    .sort(
+      (left, right) =>
+        left.startSeconds - right.startSeconds ||
+        left.endSeconds - right.endSeconds ||
+        left.id.localeCompare(right.id),
+    );
+  const cues = normalizeRollingCues(parsedCues);
 
   if (cues.length === 0) {
     throw new CaptionSourceParseError(
@@ -242,7 +338,10 @@ export function learningSentencesFromCues(
       ],
       startSeconds: firstFragment.startSeconds,
       endSeconds: lastFragment.endSeconds,
-      text: sentenceFragments.map(({ text }) => text).join(" "),
+      text: sentenceFragments
+        .map(({ text }) => text)
+        .join(" ")
+        .replace(/\s+([,.;:!?\])}”’])/g, "$1"),
     });
     sentenceFragments = [];
   };

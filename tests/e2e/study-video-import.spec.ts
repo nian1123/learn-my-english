@@ -270,6 +270,70 @@ We visited North St. Paul.
   expect(playerCalls[0].seconds).toBeLessThan(16);
 });
 
+test("Caption Source normalization keeps cue order, words, and explicit speakers", async ({
+  page,
+}) => {
+  const markedUpOutOfOrderCaptionSource = `WEBVTT
+
+00:00:06.000 --> 00:00:08.000
+<v Maya><i>Second thought.</i></v>
+
+00:00:01.000 --> 00:00:03.000 align:start position:10%
+<c.highlight>First&nbsp;   thought.</c>
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: markedUpOutOfOrderCaptionSource,
+    fileName: "marked-up-out-of-order.vtt",
+  });
+
+  const learningSentences = page.locator(".learning-sentence strong");
+  await expect(learningSentences).toHaveText([
+    "First thought.",
+    "Maya: Second thought.",
+  ]);
+});
+
+test("rolling Caption Source text becomes one complete Learning Sentence", async ({
+  page,
+}) => {
+  const rollingCaptionSource = `WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+We are building
+
+00:00:02.000 --> 00:00:04.500
+building a better
+
+00:00:04.000 --> 00:00:06.000
+a better listening tool.
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: rollingCaptionSource,
+    fileName: "rolling.vtt",
+  });
+
+  await expect(
+    page.getByText("We are building a better listening tool.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("1 句")).toBeVisible();
+
+  await page.getByRole("button", { name: "播放第 1 句" }).click();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(6));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
+});
+
 test("learner is warned when the Caption Source content type is unsupported", async ({
   page,
 }) => {
@@ -319,6 +383,23 @@ test("learner imports an SRT Caption Source", async ({ page }) => {
   await expect(
     page.getByText("学习者提供的 Caption Source · SRT"),
   ).toBeVisible();
+});
+
+test("SRT display directives stay out of Learning Sentences", async ({ page }) => {
+  const styledSrtCaptionSource = `1
+00:00:01,000 --> 00:00:03,500
+{\\an8}<font color="#fff">HOST:</font>   Welcome home.
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: styledSrtCaptionSource,
+    fileName: "styled-interview.srt",
+    mimeType: "application/x-subrip",
+  });
+
+  await expect(page.getByText("HOST: Welcome home.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/\\an8/)).toHaveCount(0);
 });
 
 test("learner is given a supported URL example for an invalid URL", async ({
