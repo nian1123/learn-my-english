@@ -21,8 +21,12 @@ const VTT_TIMESTAMP_PATTERN = /^(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})$/;
 const SRT_TIMESTAMP_PATTERN = /^(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})$/;
 const MAXIMUM_SENTENCE_GAP_SECONDS = 3;
 const TERMINAL_PUNCTUATION_PATTERN = /[.!?](?:["'”’\])}]*)$/;
-const ADDRESS_SUFFIX_BOUNDARY_PATTERN =
-  /\b[A-Z][A-Za-z'-]*\s+(?:Ave|Blvd|Ln|Rd|St)\.(?=\s+[A-Z])/g;
+const ADDRESS_CONTEXT_PATTERN = String.raw`(?:\b\d{1,6}\s+|\b(?:[Aa]long|[Aa]t|[Dd]own|[Nn]ear|[Oo]n|[Oo]nto|[Pp]ast|[Rr]eached|[Tt]oward|[Tt]owards|[Uu]p)\s+)`;
+const STREET_NAME_PATTERN = String.raw`(?:[A-Z][A-Za-z'-]*\s+){1,4}`;
+const ADDRESS_SUFFIX_BOUNDARY_PATTERN = new RegExp(
+  `${ADDRESS_CONTEXT_PATTERN}${STREET_NAME_PATTERN}(?:Ave|Blvd|Ln|Rd|St)\\.(?=\\s+[A-Z])`,
+  "g",
+);
 
 export class CaptionSourceParseError extends Error {
   constructor(message: string) {
@@ -94,11 +98,6 @@ function splitAddressSuffixBoundaries(
   for (const match of sentenceText.matchAll(ADDRESS_SUFFIX_BOUNDARY_PATTERN)) {
     if (match.index === undefined) continue;
     const boundary = sentenceRange.start + match.index + match[0].length;
-    const phraseBeforeSuffix = text.slice(sentenceRange.start, boundary);
-    const precedingWordCount =
-      phraseBeforeSuffix.match(/\b[A-Za-z][A-Za-z'-]*\b/g)?.length ?? 0;
-    if (precedingWordCount < 3) continue;
-
     ranges.push({ start: rangeStart, end: boundary });
     rangeStart = boundary;
   }

@@ -211,6 +211,9 @@ Meet Dr. Smith.
 
 00:00:38.000 --> 00:00:40.000
 Visit St. Paul.
+
+00:00:42.000 --> 00:00:44.000
+We visited North St. Paul.
 `;
 
   await installYouTubePlayerBoundary(page, { duration: 74 });
@@ -233,7 +236,10 @@ Visit St. Paul.
   ).toBeVisible();
   await expect(page.getByText("Meet Dr. Smith.", { exact: true })).toBeVisible();
   await expect(page.getByText("Visit St. Paul.", { exact: true })).toBeVisible();
-  await expect(page.getByText("12 句")).toBeVisible();
+  await expect(
+    page.getByText("We visited North St. Paul.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("13 句")).toBeVisible();
 
   await page.getByRole("button", { name: "播放第 3 句" }).click();
   await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(15));
