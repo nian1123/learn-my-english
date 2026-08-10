@@ -1,0 +1,3 @@
+# Use a local full-stack app with browser-owned learning data
+
+The MVP runs as a local TypeScript and Next.js full-stack application rather than a static site or hosted multi-user service. A local server performs operations that cannot safely run in the browser, including caption extraction and calls to dictionary and AI providers, while IndexedDB owns the learner's Study Library, progress, Local Revisions, preferences, and Word Bank. This deliberately avoids accounts, a user database, and cloud sync; JSON export and restore provide portability and recovery until cross-device use becomes a demonstrated need.

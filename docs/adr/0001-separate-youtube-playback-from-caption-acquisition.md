@@ -1,0 +1,3 @@
+# Separate YouTube playback from caption acquisition
+
+Study Videos are always played through the official YouTube embedded player; the application does not download or host video or audio. Because YouTube's official captions download API requires permission to edit the source video, caption acquisition is a separate, replaceable capability: the personal MVP may attempt public-caption extraction through `yt-dlp`, while clearly treating it as an unofficial and potentially brittle integration, and always offers learner-supplied `.vtt` or `.srt` files as the reliable fallback. Videos that cannot be embedded are rejected because captions without playable source media cannot complete the Listening Practice loop.
