@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const externalProviderEnvironment = {
   YT_DLP_PATH: "./tests/fixtures/yt-dlp",
   DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
+  YOUTUBE_OEMBED_BASE_URL: "http://127.0.0.1:4175/oembed",
 };
 
 const configuredAiEnvironment = {
@@ -58,6 +59,12 @@ export default defineConfig({
     {
       command: "node tests/fixtures/dictionary-provider.mjs",
       url: "http://127.0.0.1:4174/health",
+      reuseExistingServer: false,
+      timeout: 10_000,
+    },
+    {
+      command: "node tests/fixtures/youtube-metadata-provider.mjs",
+      url: "http://127.0.0.1:4175/health",
       reuseExistingServer: false,
       timeout: 10_000,
     },
