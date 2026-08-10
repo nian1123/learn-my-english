@@ -91,6 +91,10 @@ if (arguments_.includes("--write-auto-subs")) {
   writeFileSync(
     join(directory, "caption.en-US.vtt"),
     `WEBVTT
+Kind: captions
+Language: en
+
+00:00:00.500 --> 00:00:01.000
 
 00:00:01.000 --> 00:00:04.000
 Practice with automatic captions.

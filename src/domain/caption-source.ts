@@ -250,13 +250,13 @@ function cueFromBlock(
     startSeconds === null ||
     endSeconds === null ||
     startSeconds < 0 ||
-    endSeconds <= startSeconds ||
-    !text
+    endSeconds <= startSeconds
   ) {
     throw new CaptionSourceParseError(
       `第 ${index + 1} 个时间段无效，请检查起止时间和英文内容。`,
     );
   }
+  if (!text) return null;
 
   return {
     id: captionCueIdForIndex(index),
@@ -290,7 +290,14 @@ export function parseCaptionSource(
     );
   }
 
-  const body = format === "vtt" ? remainingLines.join("\n") : normalized;
+  let body = normalized;
+  if (format === "vtt") {
+    const headerBoundary = normalized.match(/\n[ \t]*\n/);
+    body =
+      headerBoundary?.index === undefined
+        ? remainingLines.join("\n")
+        : normalized.slice(headerBoundary.index + headerBoundary[0].length);
+  }
   const parsedCues = body
     .split(/\n{2,}/)
     .map((block, index) => cueFromBlock(block, index, format))
