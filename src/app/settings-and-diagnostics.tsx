@@ -9,6 +9,7 @@ import type {
   RuntimeStatus,
 } from "@/domain/runtime-diagnostics";
 
+import { LocalDataBackupControls } from "./local-data-backup-controls";
 import { useStudyLibraryClient } from "./study-library-client-context";
 
 const CAPABILITIES: ReadonlyArray<{
@@ -222,6 +223,10 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
             </button>
           ) : null}
         </section>
+
+        <LocalDataBackupControls
+          persistenceAvailable={persistenceStatus === "available"}
+        />
 
         <div className="panel-note">
           AI 未配置不会阻止听力学习；本地数据不可用时，应用将停止写入。

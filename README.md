@@ -44,6 +44,8 @@ DEEPSEEK_MODEL=
 
 删除 Study Video 时，视频、学习进度和本地修订会一起移除，但 Word Bank 语境默认保留并标记为来源不可用。确认删除时可以选择同时移除只来自该视频的 Word Bank 语境；同一表达在其他 Study Video 中保存的语境不会受到影响。
 
+“设置与诊断”可以导出 schema version 1 的 JSON 备份，覆盖 Study Library、Caption Sources、Learning Sentences、本地修订、学习进度、学习偏好、DeepSeek 同意状态、Word Lookup 缓存和 Word Bank。备份不包含 API 密钥、服务端环境配置或音视频文件。恢复前会完整校验文件；“合并”遇到同一标识但内容不同会停止整个事务，“替换”会原子清空并写入备份，因此无效、不兼容或冲突的文件都不会留下部分修改。
+
 ## 字幕获取边界
 
 Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。

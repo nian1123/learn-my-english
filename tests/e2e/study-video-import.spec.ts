@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test, type Page } from "@playwright/test";
 
 const VALID_VIDEO_URL = "https://youtu.be/dQw4w9WgXcQ";
@@ -1783,6 +1785,233 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
       .getByRole("article", { name: /Word Bank: practice/i })
       .filter({ hasText: "Today we're talking about practice." }),
   ).toBeVisible();
+});
+
+test("versioned backup safely round-trips all local learning data", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  await request.post("http://127.0.0.1:4174/reset");
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
+  await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await page.goto("/");
+  const manualVideoCard = page.locator(
+    '.study-video-card:has(a[href="/study/study-video-nocaptions1"])',
+  );
+  await manualVideoCard
+    .getByRole("button", { name: /删除 Study Video/ })
+    .click();
+  await page
+    .getByRole("dialog", { name: "删除 Study Video？" })
+    .getByRole("button", { name: "删除视频" })
+    .click();
+  await expect(manualVideoCard).toHaveCount(0);
+
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/autocaps001",
+  });
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 1 句" });
+  await editor
+    .getByLabel("句子文本")
+    .fill("Practice with restored automatic captions.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+  await expect(page.getByText("Local Revision", { exact: true })).toBeVisible();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(5));
+  await expect(page.getByText("上次位置 0:05")).toBeVisible();
+
+  await page.getByRole("button", { name: "查询 Practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await page.getByRole("checkbox", { name: "默认隐藏字幕" }).check();
+  await expect(page.getByText("偏好已保存")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出全部本地数据" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^learn-my-english-backup-\d{4}-\d{2}-\d{2}\.json$/,
+  );
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error("Backup download did not produce a file");
+  const backupText = await readFile(downloadPath, "utf8");
+  const backup = JSON.parse(backupText);
+  expect(backup.backupSchemaVersion).toBe(1);
+  expect(backup.application).toBe("learn-my-english");
+  expect(backup.data.preferences).toEqual({
+    deepSeekCloudConsent: "granted",
+    hideTranscriptByDefault: true,
+  });
+  expect(backup.data.studyLibrary).toHaveLength(1);
+  expect(backup.data.studyLibrary[0].localRevision.sentences[0].text).toBe(
+    "Practice with restored automatic captions.",
+  );
+  expect(backup.data.studyLibrary[0].lastPositionSeconds).toBe(5);
+  expect(backup.data.wordBank).toHaveLength(2);
+  expect(backup.data.wordLookups.length).toBeGreaterThan(1);
+  expect(backupText).not.toContain("e2e-local-secret");
+  expect(backupText).not.toContain("e2e-deepseek-secret");
+  expect(backupText).not.toMatch(/data:(?:audio|video)\//);
+
+  const backupInput = page.getByLabel("选择备份 JSON");
+  await backupInput.setInputFiles({
+    name: "unsupported-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({ ...backup, backupSchemaVersion: 999 }),
+    ),
+  });
+  await expect(
+    page.getByRole("alert").filter({ hasText: "不支持这个备份版本" }),
+  ).toBeVisible();
+
+  await backupInput.setInputFiles({
+    name: "unsafe-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ ...backup, apiKey: "must-not-import" })),
+  });
+  await expect(
+    page.getByRole("alert").filter({ hasText: "备份结构无效" }),
+  ).toBeVisible();
+
+  const conflictingBackup = structuredClone(backup);
+  conflictingBackup.data.studyLibrary[0].title = "Conflicting restored title";
+  await backupInput.setInputFiles({
+    name: "conflicting-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(conflictingBackup)),
+  });
+  let restoreConfirmation = page.getByRole("dialog", {
+    name: "恢复本地学习数据？",
+  });
+  await expect(restoreConfirmation).toContainText(
+    "合并会保留当前数据；遇到同一标识但内容不同会停止整个恢复",
+  );
+  await restoreConfirmation.getByRole("radio", { name: "合并" }).check();
+  await restoreConfirmation
+    .getByRole("button", { name: "确认恢复" })
+    .click();
+  await expect(
+    restoreConfirmation
+      .getByRole("alert")
+      .filter({ hasText: "发现冲突，本地数据没有改变" }),
+  ).toBeVisible();
+  const stateAfterConflict = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const openRequest = indexedDB.open("learn-my-english", 4);
+      openRequest.onsuccess = () => resolve(openRequest.result);
+      openRequest.onerror = () => reject(openRequest.error);
+    });
+    const transaction = database.transaction(
+      ["study-videos", "word-bank"],
+      "readonly",
+    );
+    const readAll = (storeName: string) =>
+      new Promise<unknown[]>((resolve, reject) => {
+        const readRequest = transaction.objectStore(storeName).getAll();
+        readRequest.onsuccess = () => resolve(readRequest.result);
+        readRequest.onerror = () => reject(readRequest.error);
+      });
+    const [studyVideos, wordBank] = await Promise.all([
+      readAll("study-videos"),
+      readAll("word-bank"),
+    ]);
+    database.close();
+    return { studyVideos, wordBank };
+  });
+  expect(stateAfterConflict.studyVideos).toHaveLength(1);
+  expect(stateAfterConflict.studyVideos[0]).not.toMatchObject({
+    title: "Conflicting restored title",
+  });
+  expect(stateAfterConflict.wordBank).toHaveLength(2);
+  await restoreConfirmation
+    .getByRole("button", { name: "取消恢复" })
+    .click();
+  await page.getByRole("button", { name: "关闭设置与诊断" }).click();
+
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const deleteRequest = indexedDB.deleteDatabase("learn-my-english");
+        deleteRequest.onsuccess = () => resolve();
+        deleteRequest.onerror = () => reject(deleteRequest.error);
+      }),
+  );
+  await page.reload();
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+  await expect(page.getByText("还没有保存 Word Lookup")).toBeVisible();
+
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await page.getByLabel("选择备份 JSON").setInputFiles({
+    name: "learn-my-english-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(backupText),
+  });
+  restoreConfirmation = page.getByRole("dialog", {
+    name: "恢复本地学习数据？",
+  });
+  await restoreConfirmation.getByRole("radio", { name: "替换" }).check();
+  await expect(restoreConfirmation).toContainText(
+    "替换会清空当前学习数据，再完整写入这份备份",
+  );
+  await restoreConfirmation
+    .getByRole("button", { name: "确认恢复" })
+    .click();
+
+  const bankEntries = page.getByRole("article", { name: /Word Bank:/ });
+  await expect(page.locator(".study-video-card")).toHaveCount(1);
+  await expect(bankEntries).toHaveCount(2);
+  const unavailableEntry = bankEntries.filter({
+    hasText: "Today we're talking about practice.",
+  });
+  const availableEntry = bankEntries.filter({
+    hasText: "Practice with restored automatic captions.",
+  });
+  await expect(unavailableEntry).toContainText("来源 Study Video 已不在学习库");
+  await expect(
+    unavailableEntry.getByRole("link", { name: "回到原句并播放" }),
+  ).toHaveCount(0);
+  await expect(
+    availableEntry.getByRole("link", { name: "回到原句并播放" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await expect(page.getByRole("checkbox", { name: "默认隐藏字幕" })).toBeChecked();
+  await expect(page.getByText("已允许 DeepSeek 云端回退")).toBeVisible();
+  await page.getByRole("button", { name: "关闭设置与诊断" }).click();
+
+  await availableEntry.getByRole("link", { name: "回到原句并播放" }).click();
+  await expect(page.getByText("已从 Word Bank 返回并播放第 1 句")).toBeVisible();
+  await expect(page.getByText("上次位置 0:05")).toBeVisible();
+    await page.getByRole("button", { name: "显示原文 T" }).click();
+  await expect(
+    page.getByText("Practice with restored automatic captions.", { exact: true }),
+  ).toBeVisible();
+  await page.route("**/api/dictionary**", (route) => route.abort());
+  await page.route("**/api/word-lookup/ai", (route) => route.abort());
+  await page.getByRole("button", { name: "查询 Practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await expect(lookup).toContainText("Repetition of an activity to improve a skill.");
 });
 
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({

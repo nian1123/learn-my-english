@@ -14,7 +14,7 @@ import {
   transactionCompleted,
 } from "./learning-database";
 
-type CachedWordLookup = {
+export type CachedWordLookup = {
   cacheKey: string;
   explanationVersion: string;
   cachedAt: string;
@@ -36,7 +36,7 @@ export function wordLookupCacheKey(
   ]);
 }
 
-function isCachedWordLookup(value: unknown): value is CachedWordLookup {
+export function isCachedWordLookup(value: unknown): value is CachedWordLookup {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<CachedWordLookup>;
   return (

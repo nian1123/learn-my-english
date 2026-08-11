@@ -6,7 +6,7 @@ import {
   transactionCompleted,
 } from "./learning-database";
 
-const LEARNER_PREFERENCE_KEY = "learner-preferences";
+export const LEARNER_PREFERENCE_KEY = "learner-preferences";
 
 export type LearnerPreferences = {
   hideTranscriptByDefault: boolean;
@@ -19,6 +19,18 @@ export const DEFAULT_LEARNER_PREFERENCES: LearnerPreferences = {
   hideTranscriptByDefault: false,
   deepSeekCloudConsent: "unknown",
 };
+
+export function isLearnerPreferences(value: unknown): value is LearnerPreferences {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 2 &&
+    typeof candidate.hideTranscriptByDefault === "boolean" &&
+    (candidate.deepSeekCloudConsent === "unknown" ||
+      candidate.deepSeekCloudConsent === "granted" ||
+      candidate.deepSeekCloudConsent === "declined")
+  );
+}
 
 function normalizePreferences(value: unknown): LearnerPreferences {
   if (typeof value !== "object" || value === null) {

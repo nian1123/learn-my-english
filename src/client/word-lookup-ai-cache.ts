@@ -18,7 +18,7 @@ type AvailableWordLookupAiResponse = Extract<
   { status: "available" }
 >;
 
-type CachedWordLookupAi = {
+export type CachedWordLookupAi = {
   cacheKey: string;
   explanationVersion: string;
   cachedAt: string;
@@ -44,7 +44,9 @@ function wordLookupAiCacheKey(
   ]);
 }
 
-function isCachedWordLookupAi(value: unknown): value is CachedWordLookupAi {
+export function isCachedWordLookupAi(
+  value: unknown,
+): value is CachedWordLookupAi {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<CachedWordLookupAi>;
   return (
