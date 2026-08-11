@@ -1422,6 +1422,93 @@ test("inflections, contractions, candidate expressions, and phrase selection are
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
+test("failed confirmed American dictionary audio can retry or use browser speech", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const mediaCalls: string[] = [];
+    const speechCalls: Array<{ lang: string; text: string }> = [];
+
+    Object.defineProperty(HTMLMediaElement.prototype, "load", {
+      configurable: true,
+      value: () => mediaCalls.push("load"),
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: () => {
+        mediaCalls.push("play");
+        return Reflect.get(window, "__rejectMediaPlay")
+          ? Promise.reject(new Error("simulated media playback failure"))
+          : Promise.resolve();
+      },
+    });
+
+    class FakeSpeechSynthesisUtterance {
+      lang = "";
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    Object.defineProperty(window, "SpeechSynthesisUtterance", {
+      configurable: true,
+      value: FakeSpeechSynthesisUtterance,
+    });
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: {
+        cancel: () => undefined,
+        speak: (utterance: { lang: string; text: string }) =>
+          speechCalls.push({ lang: utterance.lang, text: utterance.text }),
+      },
+    });
+
+    Reflect.set(window, "__mediaCalls", mediaCalls);
+    Reflect.set(window, "__speechCalls", speechCalls);
+  });
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  const lookup = page.getByRole("dialog", {
+    name: "Word Lookup: practice",
+  });
+  const audio = lookup.getByLabel("美式发音 practice");
+  await expect(audio).toBeVisible();
+
+  await audio.evaluate((element) => element.dispatchEvent(new Event("error")));
+  await expect(lookup.getByRole("alert")).toHaveText(
+    "美式词典音频播放失败。可以重试，或改用浏览器 en-US 发音。",
+  );
+
+  await page.evaluate(() => Reflect.set(window, "__rejectMediaPlay", true));
+  await lookup
+    .getByRole("button", { name: "重试美式词典音频 practice" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__mediaCalls")))
+    .toEqual(["load", "play"]);
+  await expect(lookup.getByRole("alert")).toHaveText(
+    "美式词典音频播放失败。可以重试，或改用浏览器 en-US 发音。",
+  );
+
+  await lookup
+    .getByRole("button", { name: "使用浏览器美式发音朗读 practice" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__speechCalls")))
+    .toEqual([{ lang: "en-US", text: "practice" }]);
+
+  await page.evaluate(() => Reflect.set(window, "__rejectMediaPlay", false));
+  await lookup
+    .getByRole("button", { name: "重试美式词典音频 practice" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__mediaCalls")))
+    .toEqual(["load", "play", "load", "play"]);
+  await expect(lookup.getByRole("alert")).toHaveCount(0);
+});
+
 test("missing audio uses en-US speech and dictionary failures stay explicit", async ({
   page,
 }) => {

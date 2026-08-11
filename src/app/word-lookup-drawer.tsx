@@ -146,15 +146,49 @@ function DictionaryPronunciation({
   audio: DictionaryAudio;
   candidate: WordLookupCandidate;
 }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+
+  const retry = async () => {
+    const element = audioRef.current;
+    if (!element) return;
+
+    setPlaybackFailed(false);
+    element.load();
+    try {
+      await element.play();
+    } catch {
+      setPlaybackFailed(true);
+    }
+  };
+
   return (
     <div className="lookup-pronunciation dictionary-audio">
       <span>已确认的美式词典音频</span>
       <audio
         aria-label={`美式发音 ${candidate.normalizedForm}`}
         controls
+        onError={() => setPlaybackFailed(true)}
+        onPlaying={() => setPlaybackFailed(false)}
         preload="none"
+        ref={audioRef}
         src={audio.url}
       />
+      {playbackFailed ? (
+        <div className="dictionary-audio-recovery">
+          <p role="alert">
+            美式词典音频播放失败。可以重试，或改用浏览器 en-US 发音。
+          </p>
+          <button
+            aria-label={`重试美式词典音频 ${candidate.normalizedForm}`}
+            onClick={() => void retry()}
+            type="button"
+          >
+            重试 <span>词典音频</span>
+          </button>
+          <BrowserPronunciation candidate={candidate} />
+        </div>
+      ) : null}
       {audio.license ? (
         <a href={audio.license.url} rel="noreferrer" target="_blank">
           音频许可 {audio.license.name}

@@ -2441,6 +2441,15 @@ footer {
   height: 36px;
 }
 
+.dictionary-audio-recovery {
+  display: grid;
+  gap: 7px;
+}
+
+.dictionary-audio-recovery .lookup-pronunciation {
+  margin-top: 0;
+}
+
 .dictionary-audio a,
 .lookup-entry > a {
   width: fit-content;
