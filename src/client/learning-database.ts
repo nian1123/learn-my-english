@@ -1,9 +1,10 @@
 export const LEARNING_DATABASE_NAME = "learn-my-english";
-export const LEARNING_DATABASE_VERSION = 2;
+export const LEARNING_DATABASE_VERSION = 3;
 
 export const LEARNING_STORES = {
   preferences: "preferences",
   studyVideos: "study-videos",
+  wordLookups: "word-lookups",
 } as const;
 
 export class LocalPersistenceUnavailableError extends Error {

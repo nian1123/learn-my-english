@@ -13,6 +13,7 @@ import type { YouTubePlayerInstance } from "@/client/youtube-iframe-api";
 import type { YouTubeVideoId } from "@/domain/study-video";
 
 export type YouTubePlayerHandle = {
+  pause: () => void;
   playFrom: (seconds: number) => void;
   setPlaybackRate: (rate: number) => void;
   setRepeatInterval: (interval: PlaybackInterval | null) => void;
@@ -217,6 +218,9 @@ export const YouTubePlayer = forwardRef<
   useImperativeHandle(
     forwardedRef,
     () => ({
+      pause: () => {
+        playerRef.current?.pauseVideo();
+      },
       playFrom: (seconds) => {
         clearRepeatGapTimer();
         leaveRepeatGap();

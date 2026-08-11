@@ -176,6 +176,77 @@ async function submitStudyVideoImport(
   }
 }
 
+async function selectTextWithinSentence(
+  page: Page,
+  sentenceIndex: number,
+  selectedText: string,
+) {
+  await page
+    .locator(".learning-sentence-text")
+    .nth(sentenceIndex)
+    .evaluate((element, requestedText) => {
+      const document = element.ownerDocument;
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const textNodes: Text[] = [];
+      let fullText = "";
+      while (walker.nextNode()) {
+        const node = walker.currentNode as Text;
+        textNodes.push(node);
+        fullText += node.data;
+      }
+
+      const startOffset = fullText.indexOf(requestedText);
+      if (startOffset < 0) throw new Error(`Missing text: ${requestedText}`);
+      const endOffset = startOffset + requestedText.length;
+      let traversed = 0;
+      let startNode: Text | null = null;
+      let endNode: Text | null = null;
+      let startInNode = 0;
+      let endInNode = 0;
+
+      for (const node of textNodes) {
+        const nextTraversed = traversed + node.length;
+        if (!startNode && startOffset <= nextTraversed) {
+          startNode = node;
+          startInNode = startOffset - traversed;
+        }
+        if (endOffset <= nextTraversed) {
+          endNode = node;
+          endInNode = endOffset - traversed;
+          break;
+        }
+        traversed = nextTraversed;
+      }
+      if (!startNode || !endNode) throw new Error("Unable to create selection");
+
+      const range = document.createRange();
+      range.setStart(startNode, startInNode);
+      range.setEnd(endNode, endInNode);
+      const selection = document.defaultView?.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    }, selectedText);
+}
+
+async function selectAcrossSentences(page: Page) {
+  await page.locator(".sentence-list").evaluate((list) => {
+    const sentenceTexts = list.querySelectorAll(".learning-sentence-text");
+    const firstText = sentenceTexts[0]?.firstChild;
+    const secondText = sentenceTexts[1]?.lastChild;
+    if (!firstText || !secondText) throw new Error("Missing sentence text");
+    const range = document.createRange();
+    range.setStart(firstText, 0);
+    range.setEnd(secondText, secondText.textContent?.length ?? 0);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    sentenceTexts[1]?.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true }),
+    );
+  });
+}
+
 test("learner starts automatic caption import with only a YouTube URL", async ({
   page,
 }) => {
@@ -207,7 +278,7 @@ test("automatic English captions are used when manual captions are absent", asyn
 
   await expect(page.getByText("Practice with automatic captions.")).toBeVisible();
   await expect(page.getByText("Next sentence.", { exact: true })).toBeVisible();
-  await expect(page.locator(".learning-sentence strong")).toHaveText([
+  await expect(page.locator(".learning-sentence-text")).toHaveText([
     "Practice with automatic captions.",
     "Next sentence.",
   ]);
@@ -552,7 +623,7 @@ test("transcript visibility and playback speed respect learner and video capabil
     page.getByRole("heading", { name: "The Daily American Interview" }),
   ).toBeVisible();
 
-  const firstSentenceText = page.locator(".learning-sentence strong").first();
+  const firstSentenceText = page.locator(".learning-sentence-text").first();
   await expect(firstSentenceText).toBeHidden();
   await expect(page.getByRole("button", { name: "0.75x" })).toBeVisible();
   await expect(page.getByRole("button", { name: "1x" })).toBeVisible();
@@ -606,7 +677,7 @@ test("Chinese shortcut guide matches the available listening controls", async ({
     "true",
   );
   await page.keyboard.press("t");
-  await expect(page.locator(".learning-sentence strong").first()).toBeHidden();
+  await expect(page.locator(".learning-sentence-text").first()).toBeHidden();
   await expect
     .poll(() =>
       page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
@@ -772,6 +843,184 @@ test("the learner can split, merge, and restore all original Learning Sentences"
   await expect(
     page.getByText("学习者提供的 Caption Source · VTT", { exact: true }),
   ).toBeVisible();
+});
+
+test("clicking a word pauses playback and opens a cached Dictionary-only lookup", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4174/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  const lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup).toBeVisible();
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("原文词形 practice", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("词典形式 practice", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("noun", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("/ˈpræk.tɪs/", { exact: true })).toBeVisible();
+  await expect(
+    lookup.getByText("Repetition of an activity to improve a skill.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    lookup.getByText("Careful listening improves with practice.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(lookup.getByText("已确认的美式词典音频")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([{ method: "pauseVideo" }]);
+
+  const playerBox = await page
+    .getByRole("region", { name: "YouTube 播放器" })
+    .boundingBox();
+  const lookupBox = await lookup.boundingBox();
+  expect(lookupBox?.x).toBeGreaterThanOrEqual(
+    (playerBox?.x ?? 0) + (playerBox?.width ?? 0),
+  );
+
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await expect(lookup).toHaveCount(0);
+  await expect(
+    page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+  ).resolves.toEqual([{ method: "pauseVideo" }]);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Word Lookup: practice" })
+      .getByText("本地缓存", { exact: true }),
+  ).toBeVisible();
+  const providerRequests = await request
+    .get("http://127.0.0.1:4174/requests?term=practice")
+    .then((response) => response.json());
+  expect(providerRequests).toEqual({ count: 1 });
+});
+
+test("inflections, contractions, candidate expressions, and phrase selection are transparent", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await expect(lookup.getByText("原文词形 talking", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("词典形式 talk", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "查询候选短语 talk about" }).click();
+  await expect(lookup.getByText("原文词形 talking about", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("词典形式 talk about", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("To discuss a particular subject.")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.getByRole("button", { name: "查询 we're" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: we're" });
+  await expect(lookup.getByText("原文词形 we're", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("词典形式 we are", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("基础词典没有收录这个词条")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await selectTextWithinSentence(page, 1, "talking about practice");
+  lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking about practice",
+  });
+  await expect(lookup.getByText("词典形式 talk about practice")).toBeVisible();
+  await expect(
+    lookup.getByText(
+      "To discuss the repeated work used to improve a skill.",
+    ),
+  ).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await selectAcrossSentences(page);
+  await expect(
+    page.getByRole("alert").filter({
+      hasText: "只能查询同一句 Learning Sentence 中的连续文本",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("complementary")).toHaveCount(0);
+});
+
+test("missing audio uses en-US speech and dictionary failures stay explicit", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const speechCalls: Array<{ lang: string; text: string }> = [];
+    class FakeSpeechSynthesisUtterance {
+      lang = "";
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    Object.defineProperty(window, "SpeechSynthesisUtterance", {
+      configurable: true,
+      value: FakeSpeechSynthesisUtterance,
+    });
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: {
+        cancel: () => undefined,
+        speak: (utterance: { lang: string; text: string }) =>
+          speechCalls.push({ lang: utterance.lang, text: utterance.text }),
+      },
+    });
+    Reflect.set(window, "__speechCalls", speechCalls);
+  });
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Mystery failure arrives.
+`,
+  });
+
+  await page.getByRole("button", { name: "查询 Mystery" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: Mystery",
+  });
+  await expect(lookup.getByText("基础词典没有收录这个词条")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.getByRole("button", { name: "查询 failure" }).click();
+  lookup = page.getByRole("complementary", {
+    name: "Word Lookup: failure",
+  });
+  await expect(lookup.getByRole("alert")).toContainText(
+    "基础词典暂时不可用，也没有可用缓存",
+  );
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 1 句" });
+  await editor.getByLabel("句子文本").fill("We are talking clearly.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  const browserPronunciation = lookup.getByRole("button", {
+    name: "使用浏览器美式发音朗读 talk",
+  });
+  await expect(browserPronunciation).toBeVisible();
+  await browserPronunciation.click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__speechCalls")))
+    .toEqual([{ lang: "en-US", text: "talk" }]);
 });
 
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
@@ -961,7 +1210,7 @@ test("Caption Source normalization keeps cue order, words, and explicit speakers
     fileName: "marked-up-out-of-order.vtt",
   });
 
-  const learningSentences = page.locator(".learning-sentence strong");
+  const learningSentences = page.locator(".learning-sentence-text");
   await expect(learningSentences).toHaveText([
     "First thought.",
     "Maya: Second thought.",
@@ -1024,7 +1273,7 @@ Go.
     fileName: "intentional-repetition.vtt",
   });
 
-  await expect(page.locator(".learning-sentence strong")).toHaveText([
+  await expect(page.locator(".learning-sentence-text")).toHaveText([
     "Go.",
     "Go.",
   ]);

@@ -25,8 +25,11 @@ import type {
   StudyVideoId,
 } from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
+import type { WordLookupRequest } from "@/domain/word-lookup";
 
+import { LearningSentenceText } from "./learning-sentence-text";
 import { LearningSentenceEditor } from "./learning-sentence-editor";
+import { WordLookupDrawer } from "./word-lookup-drawer";
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
 
 export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
@@ -47,6 +50,9 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
   const [editingSentenceId, setEditingSentenceId] =
     useState<LearningSentenceId | null>(null);
   const [revisionError, setRevisionError] = useState<string | null>(null);
+  const [wordLookupRequest, setWordLookupRequest] =
+    useState<WordLookupRequest | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const playerRef = useRef<YouTubePlayerHandle>(null);
   const activeSentenceRef = useRef<HTMLButtonElement>(null);
   const selectedSentenceIdRef = useRef<LearningSentenceId | null>(null);
@@ -260,6 +266,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
 
     setStudyVideo(updated);
     setEditingSentenceId(null);
+    setWordLookupRequest(null);
     setRevisionError(null);
     selectedSentenceIdRef.current = selectedAfterRevision;
     setActiveSentenceId(selectedAfterRevision);
@@ -294,6 +301,14 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     );
   };
 
+  const openWordLookup = (request: WordLookupRequest) => {
+    setRepeatSentenceId(null);
+    playerRef.current?.setRepeatInterval(null);
+    playerRef.current?.pause();
+    setSelectionError(null);
+    setWordLookupRequest(request);
+  };
+
   keyboardActionsRef.current = {
     nextSentence: () => playAdjacentSentence(1),
     previousSentence: () => playAdjacentSentence(-1),
@@ -321,7 +336,13 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
         </div>
       </header>
 
-      <div className="study-workspace">
+      <div
+        className={
+          wordLookupRequest
+            ? "study-workspace lookup-open"
+            : "study-workspace"
+        }
+      >
         <section className="player-column" aria-label="YouTube 播放器">
           <YouTubePlayer
             className="study-player"
@@ -429,6 +450,11 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
               {revisionError}
             </p>
           ) : null}
+          {selectionError ? (
+            <p className="sentence-selection-error" role="alert">
+              {selectionError}
+            </p>
+          ) : null}
           <ol
             className={
               transcriptHidden
@@ -439,25 +465,38 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             {learningSentences.map((sentence, index) => (
               <li className="learning-sentence-item" key={sentence.id}>
                 <div className="learning-sentence-row">
-                  <button
-                    aria-label={`播放第 ${index + 1} 句`}
+                  <div
                     className={
                       activeSentenceId === sentence.id
-                        ? "learning-sentence active"
-                        : "learning-sentence"
+                        ? "learning-sentence-card active"
+                        : "learning-sentence-card"
                     }
-                    onClick={() => playSentence(sentence)}
-                    ref={
-                      activeSentenceId === sentence.id
-                        ? activeSentenceRef
-                        : undefined
-                    }
-                    type="button"
                   >
-                    <span>{formatMediaTime(sentence.startSeconds)}</span>
-                    <strong>{sentence.text}</strong>
+                    <button
+                      aria-label={`播放第 ${index + 1} 句`}
+                      className={
+                        activeSentenceId === sentence.id
+                          ? "learning-sentence active"
+                          : "learning-sentence"
+                      }
+                      onClick={() => playSentence(sentence)}
+                      ref={
+                        activeSentenceId === sentence.id
+                          ? activeSentenceRef
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      <span>{formatMediaTime(sentence.startSeconds)}</span>
+                    </button>
+                    <LearningSentenceText
+                      onLookup={openWordLookup}
+                      onSelectionError={setSelectionError}
+                      sentenceId={sentence.id}
+                      text={sentence.text}
+                    />
                     {sentence.revised ? <em>Local Revision</em> : null}
-                  </button>
+                  </div>
                   <button
                     aria-expanded={editingSentenceId === sentence.id}
                     aria-label={`编辑第 ${index + 1} 句`}
@@ -487,6 +526,13 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             ))}
           </ol>
         </section>
+        {wordLookupRequest ? (
+          <WordLookupDrawer
+            key={`${wordLookupRequest.sentenceId}:${wordLookupRequest.candidates[0]?.surfaceForm}`}
+            onClose={() => setWordLookupRequest(null)}
+            request={wordLookupRequest}
+          />
+        ) : null}
       </div>
     </main>
   );
