@@ -21,6 +21,7 @@ type YouTubePlayerProps = {
   onError?: (code: number) => void;
   onPositionChange?: (seconds: number) => void;
   onReady?: (player: YouTubePlayerInstance) => void;
+  onTimeChange?: (seconds: number) => void;
   videoId: YouTubeVideoId;
 };
 
@@ -28,7 +29,7 @@ export const YouTubePlayer = forwardRef<
   YouTubePlayerHandle,
   YouTubePlayerProps
 >(function YouTubePlayer(
-  { className, onError, onPositionChange, onReady, videoId },
+  { className, onError, onPositionChange, onReady, onTimeChange, videoId },
   forwardedRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,10 +44,12 @@ export const YouTubePlayer = forwardRef<
   const onErrorRef = useRef(onError);
   const onPositionChangeRef = useRef(onPositionChange);
   const onReadyRef = useRef(onReady);
+  const onTimeChangeRef = useRef(onTimeChange);
 
   onErrorRef.current = onError;
   onPositionChangeRef.current = onPositionChange;
   onReadyRef.current = onReady;
+  onTimeChangeRef.current = onTimeChange;
 
   const startPositionMonitoring = useCallback(
     (player: YouTubePlayerInstance) => {
@@ -61,6 +64,8 @@ export const YouTubePlayer = forwardRef<
           player.pauseVideo();
           playbackEndRef.current = null;
         }
+
+        onTimeChangeRef.current?.(position);
 
         const wholeSecond = Math.floor(position);
         if (wholeSecond !== lastReportedSecondRef.current) {

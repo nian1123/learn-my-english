@@ -25,6 +25,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     useState<LearningSentenceId | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const playerRef = useRef<YouTubePlayerHandle>(null);
+  const activeSentenceRef = useRef<HTMLButtonElement>(null);
   const positionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const persistPosition = useCallback(
@@ -42,6 +43,22 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
         .catch(() => undefined);
     },
     [studyVideoId],
+  );
+
+  const syncActiveSentence = useCallback(
+    (positionSeconds: number) => {
+      const nextActiveSentenceId =
+        studyVideo?.learningSentences.find(
+          (sentence) =>
+            positionSeconds >= sentence.startSeconds &&
+            positionSeconds < sentence.endSeconds,
+        )?.id ?? null;
+
+      setActiveSentenceId((current) =>
+        current === nextActiveSentenceId ? current : nextActiveSentenceId,
+      );
+    },
+    [studyVideo?.learningSentences],
   );
 
   useEffect(() => {
@@ -63,6 +80,11 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
       active = false;
     };
   }, [studyVideoId]);
+
+  useEffect(() => {
+    if (!activeSentenceId) return;
+    activeSentenceRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeSentenceId]);
 
   if (loading) {
     return <main className="study-loading" id="main-content">正在打开 Study Video…</main>;
@@ -119,6 +141,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
                 player.seekTo(studyVideo.lastPositionSeconds, true);
               }
             }}
+            onTimeChange={syncActiveSentence}
             ref={playerRef}
             videoId={studyVideo.youtubeVideoId}
           />
@@ -151,6 +174,11 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
                       : "learning-sentence"
                   }
                   onClick={() => playSentence(sentence)}
+                  ref={
+                    activeSentenceId === sentence.id
+                      ? activeSentenceRef
+                      : undefined
+                  }
                   type="button"
                 >
                   <span>{formatMediaTime(sentence.startSeconds)}</span>

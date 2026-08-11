@@ -20,6 +20,24 @@ Welcome from the SRT source.
 This timing should also be preserved.
 `;
 
+const LONG_CAPTION_SOURCE = `WEBVTT
+
+${Array.from({ length: 30 }, (_, index) => {
+  const sentenceNumber = index + 1;
+  const startSeconds = sentenceNumber * 2 - 1;
+  const endSeconds = startSeconds + 1.5;
+  const formatTimestamp = (seconds: number) => {
+    const wholeSeconds = Math.floor(seconds);
+    const minutes = Math.floor(wholeSeconds / 60);
+    const secondsWithinMinute = wholeSeconds % 60;
+    const milliseconds = Math.round((seconds - wholeSeconds) * 1_000);
+    return `00:${String(minutes).padStart(2, "0")}:${String(secondsWithinMinute).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  };
+
+  return `${formatTimestamp(startSeconds)} --> ${formatTimestamp(endSeconds)}\nPractice sentence ${sentenceNumber}.`;
+}).join("\n\n")}
+`;
+
 async function installYouTubePlayerBoundary(
   page: Page,
   options: { duration: number; errorCode?: number },
@@ -102,7 +120,9 @@ async function installYouTubePlayerBoundary(
 
     Reflect.set(window, "__youtubePlayerCalls", calls);
     Reflect.set(window, "__setYouTubeCurrentTime", (seconds: number) => {
-      currentPlayer?.setCurrentTime(seconds);
+      if (!currentPlayer) return false;
+      currentPlayer.setCurrentTime(seconds);
+      return true;
     });
     Reflect.set(window, "YT", {
       Player,
@@ -365,6 +385,88 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
     "value",
     "15",
   );
+});
+
+test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: LONG_CAPTION_SOURCE,
+    fileName: "long-interview.vtt",
+  });
+
+  const resumedSentence = page.locator(".learning-sentence").nth(19);
+  await page.getByRole("button", { name: "播放第 20 句" }).click();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(40));
+  await expect(page.getByText("上次位置 0:40")).toBeVisible();
+  await expect(resumedSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+
+  await page.getByRole("link", { name: "返回学习库" }).click();
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("link", { name: "继续学习" }).click();
+
+  await expect(resumedSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await expect(resumedSentence).toBeInViewport();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([{ method: "seekTo", seconds: 40 }]);
+});
+
+test("player time keeps the current Learning Sentence aligned across gaps", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: LONG_CAPTION_SOURCE,
+    fileName: "long-interview.vtt",
+  });
+
+  const activeSentences = page.locator(".learning-sentence.active");
+  const twentiethSentence = page.locator(".learning-sentence").nth(19);
+  const twentyFirstSentence = page.locator(".learning-sentence").nth(20);
+  await expect(page.getByRole("button", { name: "播放第 20 句" })).toBeVisible();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Reflect.get(window, "__setYouTubeCurrentTime")(39.25),
+      ),
+    )
+    .toBe(true);
+  await expect(twentiethSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+
+  await page.evaluate(() =>
+    Reflect.get(window, "__setYouTubeCurrentTime")(40.75),
+  );
+  await expect(activeSentences).toHaveCount(0);
+
+  await page.evaluate(() =>
+    Reflect.get(window, "__setYouTubeCurrentTime")(41.25),
+  );
+  await expect(twentyFirstSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await expect(twentyFirstSentence).toBeInViewport();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([]);
 });
 
 test("caption fragments become punctuation and three-second Learning Sentences", async ({
