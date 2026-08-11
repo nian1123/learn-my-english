@@ -32,6 +32,11 @@ html {
   scroll-behavior: smooth;
 }
 
+html.word-lookup-modal-open {
+  overflow: hidden;
+  padding-inline-end: var(--word-lookup-scrollbar-width, 0);
+}
+
 body {
   min-height: 100dvh;
   margin: 0;
@@ -1628,13 +1633,6 @@ footer {
   margin-top: 28px;
 }
 
-.study-workspace.lookup-open {
-  grid-template-columns:
-    minmax(390px, 1.05fr)
-    minmax(330px, 0.76fr)
-    minmax(340px, 0.79fr);
-}
-
 .player-column,
 .sentence-column {
   border: 1px solid var(--line);
@@ -2171,12 +2169,33 @@ footer {
   margin-top: 12px;
 }
 
+.word-lookup-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(760px, calc(100% - 32px));
+  height: fit-content;
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  margin: auto;
+  overflow: visible;
+  color: var(--text-soft);
+  border: 0;
+  background: transparent;
+}
+
+.word-lookup-dialog::backdrop {
+  background: rgba(2, 6, 13, 0.82);
+  backdrop-filter: blur(12px);
+  animation: backdrop-in 180ms ease both;
+}
+
 .word-lookup-drawer {
-  position: sticky;
-  top: 18px;
+  width: 100%;
   max-height: calc(100dvh - 36px);
   padding: 21px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--text-soft);
   border: 1px solid rgba(232, 161, 43, 0.24);
   border-radius: 18px;
@@ -2184,7 +2203,9 @@ footer {
     linear-gradient(155deg, rgba(232, 161, 43, 0.055), transparent 32%),
     var(--surface);
   box-shadow: 0 20px 56px rgba(1, 5, 15, 0.28);
+  animation: modal-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   scrollbar-color: #2a354d transparent;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
@@ -3342,14 +3363,6 @@ footer {
     max-height: none;
   }
 
-  .study-workspace.lookup-open {
-    grid-template-columns: 1fr;
-  }
-
-  .word-lookup-drawer {
-    position: static;
-    max-height: none;
-  }
 }
 
 @media (max-width: 640px) {
@@ -3475,6 +3488,30 @@ footer {
 
   .diagnostics-panel {
     border-radius: 0;
+  }
+
+  .word-lookup-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .word-lookup-drawer {
+    max-height: calc(100dvh - 20px);
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .lookup-normalization {
+    grid-template-columns: 1fr;
+  }
+
+  .lookup-word-bank-save {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lookup-word-bank-save button {
+    width: 100%;
   }
 
   .study-video-meta {

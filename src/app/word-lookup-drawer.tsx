@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   loadWordLookupAiEnrichment,
@@ -330,6 +330,9 @@ export function WordLookupDrawer({
   origin,
   request,
 }: WordLookupDrawerProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
   const {
     preferences,
     preferenceStatus,
@@ -363,6 +366,79 @@ export function WordLookupDrawer({
   const wordBankEntryId = candidate
     ? wordBankEntryIdFor(origin, candidate)
     : "missing";
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const root = document.documentElement;
+    const rootWasLocked = root.classList.contains("word-lookup-modal-open");
+    const previousScrollbarWidth = root.style.getPropertyValue(
+      "--word-lookup-scrollbar-width",
+    );
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const scrollPosition = { left: window.scrollX, top: window.scrollY };
+    const scrollbarWidth = Math.max(0, window.innerWidth - root.clientWidth);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], audio[controls], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+
+    root.style.setProperty(
+      "--word-lookup-scrollbar-width",
+      `${scrollbarWidth}px`,
+    );
+    root.classList.add("word-lookup-modal-open");
+    if (!dialog.open) dialog.showModal();
+    dialog.addEventListener("keydown", handleKeyDown);
+    closeButtonRef.current?.focus({ preventScroll: true });
+
+    return () => {
+      dialog.removeEventListener("keydown", handleKeyDown);
+      if (dialog.open) dialog.close();
+      if (!rootWasLocked) root.classList.remove("word-lookup-modal-open");
+      if (previousScrollbarWidth) {
+        root.style.setProperty(
+          "--word-lookup-scrollbar-width",
+          previousScrollbarWidth,
+        );
+      } else {
+        root.style.removeProperty("--word-lookup-scrollbar-width");
+      }
+      const previousScrollBehavior = root.style.scrollBehavior;
+      root.style.scrollBehavior = "auto";
+      window.scrollTo(scrollPosition);
+      root.style.scrollBehavior = previousScrollBehavior;
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -523,16 +599,31 @@ export function WordLookupDrawer({
   };
 
   return (
-    <aside
+    <dialog
       aria-label={`Word Lookup: ${request.candidates[0].surfaceForm}`}
-      className="word-lookup-drawer"
+      aria-modal="true"
+      className="word-lookup-dialog word-lookup-drawer"
+      tabIndex={-1}
+      onCancel={(event) => {
+        event.preventDefault();
+        onCloseRef.current();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onCloseRef.current();
+      }}
+      ref={dialogRef}
     >
       <header className="lookup-header">
         <div>
           <p className="eyebrow">WORD LOOKUP</p>
           <h2>{candidate.surfaceForm}</h2>
         </div>
-        <button aria-label="关闭 Word Lookup" onClick={onClose} type="button">
+        <button
+          aria-label="关闭 Word Lookup"
+          onClick={() => onCloseRef.current()}
+          ref={closeButtonRef}
+          type="button"
+        >
           ×
         </button>
       </header>
@@ -609,7 +700,10 @@ export function WordLookupDrawer({
       {dictionaryLoaded?.result.status === "found" ? (
         <div className="lookup-results">
           {firstAudio ? (
-            <DictionaryPronunciation audio={firstAudio} candidate={candidate} />
+            <DictionaryPronunciation
+              audio={firstAudio}
+              candidate={candidate}
+            />
           ) : (
             <BrowserPronunciation candidate={candidate} />
           )}
@@ -642,7 +736,10 @@ export function WordLookupDrawer({
             {dictionaryLoaded.result.entries
               .slice(0, 2)
               .map((entry, entryIndex) => (
-                <div className="lookup-entry" key={`${entry.word}:${entryIndex}`}>
+                <div
+                  className="lookup-entry"
+                  key={`${entry.word}:${entryIndex}`}
+                >
                   <div className="lookup-entry-heading">
                     <h3>{entry.word}</h3>
                     {entry.phonetic ? <span>{entry.phonetic}</span> : null}
@@ -700,13 +797,20 @@ export function WordLookupDrawer({
           )}
 
           {draftWordBankEntry ? (
-            <section className="lookup-word-bank-save" aria-label="Word Bank 保存">
+            <section
+              aria-label="Word Bank 保存"
+              className="lookup-word-bank-save"
+            >
               <div>
-                <strong>{savedEntry ? "已保存到 Word Bank" : "保存这次语境"}</strong>
+                <strong>
+                  {savedEntry ? "已保存到 Word Bank" : "保存这次语境"}
+                </strong>
                 <small>保留所选词义、原句、Study Video 与时间区间</small>
               </div>
               <button
-                disabled={wordBankStatus === "saving" || wordBankStatus === "removing"}
+                disabled={
+                  wordBankStatus === "saving" || wordBankStatus === "removing"
+                }
                 onClick={() =>
                   void (savedEntry ? cancelWordBankSave() : saveToWordBank())
                 }
@@ -727,6 +831,6 @@ export function WordLookupDrawer({
           ) : null}
         </div>
       ) : null}
-    </aside>
+    </dialog>
   );
 }

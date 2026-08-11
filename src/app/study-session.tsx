@@ -423,13 +423,7 @@ export function StudySession({
         </div>
       </header>
 
-      <div
-        className={
-          wordLookupRequest
-            ? "study-workspace lookup-open"
-            : "study-workspace"
-        }
-      >
+      <div className="study-workspace">
         {wordBankReturnMessage ? (
           <p className="word-bank-return-status" role="status">
             {wordBankReturnMessage}

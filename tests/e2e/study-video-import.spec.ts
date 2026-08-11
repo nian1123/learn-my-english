@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 
 const VALID_VIDEO_URL = "https://youtu.be/dQw4w9WgXcQ";
 
@@ -335,6 +341,43 @@ async function activeSentenceLatency(
   );
 }
 
+async function studyPageGeometry(page: Page) {
+  await expect(page.locator(".study-workspace")).toBeVisible();
+  return page.evaluate(() => {
+    const player = document.querySelector<HTMLElement>(".player-column");
+    const sentences = document.querySelector<HTMLElement>(".sentence-column");
+    if (!player || !sentences) throw new Error("Study workspace is missing");
+    const rect = (element: HTMLElement) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        height: bounds.height,
+        width: bounds.width,
+        x: bounds.x,
+        y: bounds.y,
+      };
+    };
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      documentWidth: document.documentElement.scrollWidth,
+      player: rect(player),
+      scrollLeft: window.scrollX,
+      scrollTop: window.scrollY,
+      sentences: rect(sentences),
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  });
+}
+
+async function centerWithoutScrollingAnimation(locator: Locator) {
+  await locator.evaluate((element) => {
+    const root = document.documentElement;
+    const previousBehavior = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    root.style.scrollBehavior = previousBehavior;
+  });
+}
+
 test("learner starts automatic caption import with only a YouTube URL", async ({
   page,
 }) => {
@@ -617,7 +660,7 @@ test("offline mode keeps local learning data readable and blocks new remote work
   await editor.getByRole("button", { name: "保存修订" }).click();
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
@@ -665,13 +708,13 @@ test("offline mode keeps local learning data readable and blocks new remote work
   });
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: practice" });
   await expect(lookup.getByText("本地缓存", { exact: true })).toBeVisible();
   await expect(lookup.getByText("AI 本地缓存", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await page.getByRole("button", { name: "查询 Welcome" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: Welcome" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: Welcome" });
   await expect(lookup.getByRole("alert")).toContainText(
     "当前离线，而且没有这个 Word Lookup 的本地缓存",
   );
@@ -1184,7 +1227,7 @@ test("the learner can split, merge, and restore all original Learning Sentences"
   ).toBeVisible();
 });
 
-test("clicking a word pauses playback and opens a cached Dictionary lookup", async ({
+test("Word Lookup is a focus-safe modal that never reflows the Study page", async ({
   page,
   request,
 }) => {
@@ -1195,12 +1238,39 @@ test("clicking a word pauses playback and opens a cached Dictionary lookup", asy
     Reflect.get(window, "__youtubePlayerCalls").splice(0),
   );
 
+  let releaseDictionaryRequest: () => void = () => undefined;
+  const dictionaryRequestGate = new Promise<void>((resolve) => {
+    releaseDictionaryRequest = resolve;
+  });
+  const delayDictionaryRequest = async (route: Route) => {
+    await dictionaryRequestGate;
+    await route.continue();
+  };
+  await page.route("**/api/dictionary**", delayDictionaryRequest);
+  const lookupTrigger = page.getByRole("button", { name: "查询 practice" });
+  await centerWithoutScrollingAnimation(lookupTrigger);
+  const geometryBeforeLookup = await studyPageGeometry(page);
+
   const firstLookupStartedAt = Date.now();
-  await page.getByRole("button", { name: "查询 practice" }).click();
-  const lookup = page.getByRole("complementary", {
+  await lookupTrigger.click();
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup).toBeVisible();
+  await expect(
+    lookup.getByText("正在查询基础词典…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    lookup.getByRole("button", { name: "关闭 Word Lookup" }),
+  ).toBeFocused();
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeLookup);
+
+  await page.keyboard.press("Shift+Tab");
+  expect(
+    await lookup.evaluate((dialog) => dialog.contains(document.activeElement)),
+  ).toBe(true);
+
+  releaseDictionaryRequest();
   await expect(lookup.getByText("Dictionary facts", { exact: true })).toBeVisible();
   const dictionaryFacts = lookup.getByRole("region", {
     name: "基础词典事实 practice",
@@ -1229,34 +1299,81 @@ test("clicking a word pauses playback and opens a cached Dictionary lookup", asy
       page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
     )
     .toEqual([{ method: "pauseVideo" }]);
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeLookup);
 
-  const playerBox = await page
-    .getByRole("region", { name: "YouTube 播放器" })
-    .boundingBox();
-  const lookupBox = await lookup.boundingBox();
-  expect(lookupBox?.x).toBeGreaterThanOrEqual(
-    (playerBox?.x ?? 0) + (playerBox?.width ?? 0),
-  );
-
-  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await page.keyboard.press("Escape");
   await expect(lookup).toHaveCount(0);
+  await expect(lookupTrigger).toBeFocused();
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeLookup);
   await expect(
     page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
   ).resolves.toEqual([{ method: "pauseVideo" }]);
 
+  await page.unroute("**/api/dictionary**", delayDictionaryRequest);
+
   await page.route("**/api/dictionary**", (route) => route.abort());
   await page.route("**/api/word-lookup/ai", (route) => route.abort());
+  await centerWithoutScrollingAnimation(lookupTrigger);
+  const geometryBeforeCachedLookup = await studyPageGeometry(page);
   const cachedLookupStartedAt = Date.now();
-  await page.getByRole("button", { name: "查询 practice" }).click();
+  await lookupTrigger.click();
+  lookup = page.getByRole("dialog", { name: "Word Lookup: practice" });
   await expect(
-    page.getByRole("complementary", { name: "Word Lookup: practice" })
-      .getByText("本地缓存", { exact: true }),
+    lookup.getByText("本地缓存", { exact: true }),
   ).toBeVisible();
   expect(Date.now() - cachedLookupStartedAt).toBeLessThan(1_000);
   const providerRequests = await request
     .get("http://127.0.0.1:4174/requests?term=practice")
     .then((response) => response.json());
   expect(providerRequests).toEqual({ count: 1 });
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await expect(lookupTrigger).toBeFocused();
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeCachedLookup);
+});
+
+test("Word Lookup stays inside a mobile viewport without moving the page", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ height: 520, width: 390 });
+  await request.post("http://127.0.0.1:4174/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  const lookupTrigger = page.getByRole("button", { name: "查询 practice" });
+  await centerWithoutScrollingAnimation(lookupTrigger);
+  const geometryBeforeLookup = await studyPageGeometry(page);
+  await lookupTrigger.click();
+  const lookup = page.getByRole("dialog", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Dictionary facts", { exact: true })).toBeVisible();
+
+  const dialogBox = await lookup.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect(dialogBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(520);
+  const panelMetrics = await lookup.evaluate((dialog) => {
+    const panel = dialog;
+    return {
+      maxHeight: panel
+        ? Number.parseFloat(getComputedStyle(panel).maxHeight)
+        : 0,
+      overflowY: panel ? getComputedStyle(panel).overflowY : "missing",
+      panelFits: Boolean(panel && panel.scrollWidth <= panel.clientWidth),
+    };
+  });
+  expect(panelMetrics.panelFits).toBe(true);
+  expect(panelMetrics.overflowY).toBe("auto");
+  expect(panelMetrics.maxHeight).toBeLessThanOrEqual(500);
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeLookup);
+
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await expect(lookup).toHaveCount(0);
+  await expect(lookupTrigger).toBeFocused();
+  expect(await studyPageGeometry(page)).toEqual(geometryBeforeLookup);
 });
 
 test("inflections, contractions, candidate expressions, and phrase selection are transparent", async ({
@@ -1266,7 +1383,7 @@ test("inflections, contractions, candidate expressions, and phrase selection are
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await expect(lookup.getByText("原文词形 talking", { exact: true })).toBeVisible();
@@ -1278,14 +1395,14 @@ test("inflections, contractions, candidate expressions, and phrase selection are
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await page.getByRole("button", { name: "查询 we're" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: we're" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: we're" });
   await expect(lookup.getByText("原文词形 we're", { exact: true })).toBeVisible();
   await expect(lookup.getByText("词典形式 we are", { exact: true })).toBeVisible();
   await expect(lookup.getByText("基础词典没有收录这个词条")).toBeVisible();
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await selectTextWithinSentence(page, 1, "talking about practice");
-  lookup = page.getByRole("complementary", {
+  lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking about practice",
   });
   await expect(lookup.getByText("词典形式 talk about practice")).toBeVisible();
@@ -1302,7 +1419,7 @@ test("inflections, contractions, candidate expressions, and phrase selection are
       hasText: "只能查询同一句 Learning Sentence 中的连续文本",
     }),
   ).toBeVisible();
-  await expect(page.getByRole("complementary")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("missing audio uses en-US speech and dictionary failures stay explicit", async ({
@@ -1341,14 +1458,14 @@ Mystery failure arrives.
   });
 
   await page.getByRole("button", { name: "查询 Mystery" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: Mystery",
   });
   await expect(lookup.getByText("基础词典没有收录这个词条")).toBeVisible();
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await page.getByRole("button", { name: "查询 failure" }).click();
-  lookup = page.getByRole("complementary", {
+  lookup = page.getByRole("dialog", {
     name: "Word Lookup: failure",
   });
   await expect(lookup.getByRole("alert")).toContainText(
@@ -1361,7 +1478,7 @@ Mystery failure arrives.
   await editor.getByLabel("句子文本").fill("We are talking clearly.");
   await editor.getByRole("button", { name: "保存修订" }).click();
   await page.getByRole("button", { name: "查询 talking" }).click();
-  lookup = page.getByRole("complementary", {
+  lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   const browserPronunciation = lookup.getByRole("button", {
@@ -1391,7 +1508,7 @@ test("local AI selects a supplied dictionary sense without blurring source bound
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  const lookup = page.getByRole("complementary", {
+  const lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
@@ -1494,7 +1611,7 @@ test("first DeepSeek fallback explains cloud data and remembers a refusal", asyn
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await expect(
@@ -1521,7 +1638,7 @@ test("first DeepSeek fallback explains cloud data and remembers a refusal", asyn
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
   await page.reload();
   await page.getByRole("button", { name: "查询 talking" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: talking" });
   await expect(
     lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
   ).toHaveCount(0);
@@ -1548,7 +1665,7 @@ test("consented DeepSeek fallback is minimal, remembered, and follows Local AI",
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
@@ -1624,7 +1741,7 @@ test("consented DeepSeek fallback is minimal, remembered, and follows Local AI",
 
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
   await page.getByRole("button", { name: "查询 talking" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: talking" });
   await expect(
     lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
   ).toHaveCount(0);
@@ -1655,7 +1772,7 @@ test("DeepSeek consent can be inspected and revoked from settings", async ({
   const studyUrl = page.url();
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
@@ -1674,7 +1791,7 @@ test("DeepSeek consent can be inspected and revoked from settings", async ({
     .then((response) => response.json());
   await page.goto(studyUrl);
   await page.getByRole("button", { name: "查询 talking" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: talking" });
   await expect(
     lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
   ).toBeVisible();
@@ -1694,7 +1811,7 @@ test("DeepSeek invalid output, provider failure, and timeout preserve dictionary
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
@@ -1714,7 +1831,7 @@ test("DeepSeek invalid output, provider failure, and timeout preserve dictionary
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await selectTextWithinSentence(page, 1, "talking about practice");
-  lookup = page.getByRole("complementary", {
+  lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking about practice",
   });
   await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
@@ -1735,7 +1852,7 @@ test("Chinese meaning is default-off, lazy, and cached separately", async ({
   await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3104/" });
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
@@ -1764,7 +1881,7 @@ test("Chinese meaning is default-off, lazy, and cached separately", async ({
 
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
   await page.getByRole("button", { name: "查询 practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: practice" });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   chineseToggle = lookup.getByRole("checkbox", { name: "显示中文释义" });
   await expect(chineseToggle).not.toBeChecked();
@@ -1787,7 +1904,7 @@ test("invalid output, provider failure, and timeout preserve Dictionary-only out
   await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3104/" });
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
@@ -1800,7 +1917,7 @@ test("invalid output, provider failure, and timeout preserve Dictionary-only out
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: talking" });
   await expect(
     lookup.getByText("本地 AI 返回格式无效，已保留基础词典结果"),
   ).toBeVisible();
@@ -1821,7 +1938,7 @@ test("invalid output, provider failure, and timeout preserve Dictionary-only out
   await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
 
   await selectTextWithinSentence(page, 1, "talking about practice");
-  lookup = page.getByRole("complementary", {
+  lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking about practice",
   });
   await expect(
@@ -1843,7 +1960,7 @@ test("missing local AI configuration leaves Word Lookup usable", async ({
   await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3101/" });
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  const lookup = page.getByRole("complementary", {
+  const lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
@@ -1870,7 +1987,7 @@ test("Word Bank preserves contextual lookups, distinct videos, and exact sentenc
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
@@ -1942,7 +2059,7 @@ test("Word Bank preserves contextual lookups, distinct videos, and exact sentenc
     videoUrl: "https://youtu.be/autocaps001",
   });
   await page.getByRole("button", { name: "查询 Practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: Practice" });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
@@ -1977,7 +2094,7 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 practice" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: practice",
   });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
@@ -1989,7 +2106,7 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
     videoUrl: "https://youtu.be/autocaps001",
   });
   await page.getByRole("button", { name: "查询 Practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: Practice" });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
@@ -2141,7 +2258,7 @@ test("versioned backup safely round-trips all local learning data", async ({
   await submitStudyVideoImport(page);
 
   await page.getByRole("button", { name: "查询 talking" }).click();
-  let lookup = page.getByRole("complementary", {
+  let lookup = page.getByRole("dialog", {
     name: "Word Lookup: talking",
   });
   await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
@@ -2177,7 +2294,7 @@ test("versioned backup safely round-trips all local learning data", async ({
   await expect(page.getByText("上次位置 0:05")).toBeVisible();
 
   await page.getByRole("button", { name: "查询 Practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: Practice" });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
@@ -2351,7 +2468,7 @@ test("versioned backup safely round-trips all local learning data", async ({
   await page.route("**/api/dictionary**", (route) => route.abort());
   await page.route("**/api/word-lookup/ai", (route) => route.abort());
   await page.getByRole("button", { name: "查询 Practice" }).click();
-  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  lookup = page.getByRole("dialog", { name: "Word Lookup: Practice" });
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await expect(lookup).toContainText("Repetition of an activity to improve a skill.");
 });
