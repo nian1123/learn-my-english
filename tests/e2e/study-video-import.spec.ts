@@ -1257,6 +1257,11 @@ test("Word Lookup is a focus-safe modal that never reflows the Study page", asyn
     name: "Word Lookup: practice",
   });
   await expect(lookup).toBeVisible();
+  const desktopDialogBox = await lookup.boundingBox();
+  expect(desktopDialogBox).not.toBeNull();
+  expect(desktopDialogBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    720,
+  );
   await expect(
     lookup.getByText("正在查询基础词典…", { exact: true }),
   ).toBeVisible();
