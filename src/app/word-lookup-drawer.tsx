@@ -54,6 +54,8 @@ type FoundDictionaryResult = Extract<
 
 function aiUnavailableMessage(reason: WordLookupAiUnavailableReason) {
   switch (reason) {
+    case "offline":
+      return "当前离线；已保留基础词典结果，没有发起新的 AI 请求";
     case "not-configured":
       return "本地 AI 未配置，当前使用基础词典";
     case "timeout":

@@ -27,6 +27,7 @@ export class WordLookupProviderError extends Error {
   constructor(
     public readonly reason: Exclude<
       WordLookupAiUnavailableReason,
+      | "offline"
       | "not-configured"
       | "deepseek-consent-required"
       | "deepseek-timeout"

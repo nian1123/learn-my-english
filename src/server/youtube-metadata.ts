@@ -7,6 +7,7 @@ import {
 } from "@/domain/youtube-url";
 
 const METADATA_TIMEOUT_MS = 5_000;
+const MAXIMUM_METADATA_RESPONSE_LENGTH = 100_000;
 
 export class YouTubeMetadataError extends Error {
   constructor(
@@ -15,6 +16,28 @@ export class YouTubeMetadataError extends Error {
   ) {
     super(message);
     this.name = "YouTubeMetadataError";
+  }
+}
+
+function nonEmptyProviderText(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    Boolean(value.trim()) &&
+    value.length <= 500
+  );
+}
+
+function safeThumbnailUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2_048) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -27,16 +50,16 @@ function metadataResponse(value: unknown): {
   const candidate = value as Record<string, unknown>;
 
   if (
-    typeof candidate.title !== "string" ||
-    typeof candidate.author_name !== "string" ||
-    typeof candidate.thumbnail_url !== "string"
+    !nonEmptyProviderText(candidate.title) ||
+    !nonEmptyProviderText(candidate.author_name) ||
+    !safeThumbnailUrl(candidate.thumbnail_url)
   ) {
     return null;
   }
 
   return {
-    title: candidate.title,
-    author_name: candidate.author_name,
+    title: candidate.title.trim(),
+    author_name: candidate.author_name.trim(),
     thumbnail_url: candidate.thumbnail_url,
   };
 }
@@ -76,7 +99,23 @@ export async function readYouTubeMetadata(
     );
   }
 
-  const metadata = metadataResponse(await response.json());
+  let responseText: string;
+  try {
+    responseText = await response.text();
+  } catch {
+    throw new YouTubeMetadataError("YouTube 返回的视频信息无法读取。", 502);
+  }
+  if (responseText.length > MAXIMUM_METADATA_RESPONSE_LENGTH) {
+    throw new YouTubeMetadataError("YouTube 返回的视频信息超过安全限制。", 502);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    throw new YouTubeMetadataError("YouTube 返回的视频信息格式无效。", 502);
+  }
+  const metadata = metadataResponse(payload);
   if (!metadata) {
     throw new YouTubeMetadataError("YouTube 返回的视频信息不完整。", 502);
   }

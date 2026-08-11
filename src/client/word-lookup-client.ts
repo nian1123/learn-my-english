@@ -21,6 +21,15 @@ export class WordLookupUnavailableError extends Error {
   }
 }
 
+export class WordLookupOfflineError extends Error {
+  constructor() {
+    super(
+      "当前离线，而且没有这个 Word Lookup 的本地缓存。联网后可查询基础词典。",
+    );
+    this.name = "WordLookupOfflineError";
+  }
+}
+
 export async function loadWordLookup(
   candidate: WordLookupCandidate,
   sentenceText: string,
@@ -30,6 +39,9 @@ export async function loadWordLookup(
     () => null,
   );
   if (cached) return { result: cached, source: "cache" };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new WordLookupOfflineError();
+  }
 
   let response: Response;
   try {

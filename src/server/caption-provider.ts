@@ -1,7 +1,7 @@
 import "server-only";
 
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import { canonicalYouTubeVideoUrl, isYouTubeVideoId } from "@/domain/youtube-url
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAXIMUM_PROCESS_OUTPUT_BYTES = 10 * 1024 * 1024;
+const MAXIMUM_CAPTION_FILE_BYTES = 10 * 1024 * 1024;
 
 export type AcquiredCaptionSource = {
   contents: string;
@@ -209,8 +210,17 @@ async function downloadedCaption(
   }
 
   const format = fileName.toLowerCase().endsWith(".srt") ? "srt" : "vtt";
+  const captionPath = join(directory, fileName);
+  const captionFile = await stat(captionPath);
+  if (!captionFile.isFile() || captionFile.size > MAXIMUM_CAPTION_FILE_BYTES) {
+    throw new CaptionProviderError(
+      "自动获取的 Caption Source 超过 10 MB 或不是普通文本文件。请手动上传有效的 VTT/SRT。",
+      "failed",
+      502,
+    );
+  }
   return {
-    contents: await readFile(join(directory, fileName), "utf8"),
+    contents: await readFile(captionPath, "utf8"),
     fileName,
     format,
     kind,

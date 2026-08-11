@@ -250,6 +250,16 @@ async function selectAcrossSentences(page: Page) {
   });
 }
 
+async function setReportedNetworkState(page: Page, online: boolean) {
+  await page.evaluate((nextOnline) => {
+    Object.defineProperty(window.navigator, "onLine", {
+      configurable: true,
+      get: () => nextOnline,
+    });
+    window.dispatchEvent(new Event(nextOnline ? "online" : "offline"));
+  }, online);
+}
+
 test("learner starts automatic caption import with only a YouTube URL", async ({
   page,
 }) => {
@@ -391,6 +401,59 @@ test("missing yt-dlp offers installation guidance and file fallback", async ({
   await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
 });
 
+test("unsafe metadata and out-of-duration provider captions leave no partial Study Video", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.route("**/api/youtube/metadata**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        videoId: "dQw4w9WgXcQ",
+        canonicalUrl: "javascript:unexpected-provider-url",
+        title: "Unsafe provider metadata",
+        channel: "Untrusted source",
+        thumbnailUrl: "data:text/html,unexpected-provider-data",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page.getByRole("button", { name: "开始导入" }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "读取到的视频信息不完整" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "稍后再说" }).click();
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+  await page.unroute("**/api/youtube/metadata**");
+
+  await page.route("**/api/youtube/captions", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        contents: `WEBVTT
+
+00:01:10.000 --> 00:01:20.000
+This cue extends beyond the source video.`,
+        fileName: "out-of-duration.vtt",
+        format: "vtt",
+        kind: "manual",
+      }),
+    });
+  });
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page.getByRole("button", { name: "开始导入" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "时间范围超出视频时长" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "取消导入" }).click();
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+});
+
 test("caption endpoint rejects unvalidated identifiers before invoking yt-dlp", async ({
   request,
 }) => {
@@ -424,6 +487,120 @@ test("canceling slow caption extraction leaves no partial Study Video", async ({
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("还没有学习视频")).toBeVisible();
   await expect(page.getByRole("button", { name: "导入视频" })).toBeEnabled();
+});
+
+test("a prolonged caption request preserves its stage and offers manual fallback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.clock.install();
+
+  let releaseCaptionRequest: () => void = () => undefined;
+  const heldCaptionRequest = new Promise<void>((resolve) => {
+    releaseCaptionRequest = resolve;
+  });
+  await page.route("**/api/youtube/captions", async (route) => {
+    await heldCaptionRequest;
+    await route.abort().catch(() => undefined);
+  });
+
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page.getByRole("button", { name: "开始导入" }).click();
+  await expect(
+    page.getByText("正在通过非官方 yt-dlp 获取英文字幕…"),
+  ).toBeVisible();
+
+  await page.clock.fastForward(30_000);
+  await expect(
+    page.getByRole("status").filter({ hasText: "外部服务响应较慢" }),
+  ).toContainText("获取字幕");
+  await expect(
+    page.getByRole("list", { name: "导入阶段" }).locator("li.current"),
+  ).toContainText("获取字幕");
+
+  await page.clock.fastForward(30_000);
+  await expect(
+    page.getByRole("alert").filter({ hasText: "已等待超过 60 秒" }),
+  ).toContainText("不会创建部分 Study Video");
+  await page.getByRole("button", { name: "改用字幕文件" }).click();
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+  await expect(page.getByRole("button", { name: "取消导入" })).toBeVisible();
+  releaseCaptionRequest();
+});
+
+test("offline mode keeps local learning data readable and blocks new remote work", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "编辑第 2 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 2 句" });
+  await editor.getByLabel("句子文本").fill("Today we practice offline listening.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.goto("/");
+  await expect(page.getByRole("article", { name: /Word Bank: practice/ })).toBeVisible();
+  await setReportedNetworkState(page, false);
+
+  const offlineNotice = page.getByRole("status").filter({ hasText: "离线模式" });
+  await expect(offlineNotice).toContainText(
+    "可继续查看并编辑本地 Study Library、Caption Sources、Learning Sentences、Local Revisions、Word Lookup 缓存和 Word Bank",
+  );
+  await expect(offlineNotice).toContainText(
+    "YouTube 播放、导入及新的词典或 AI 请求已停用",
+  );
+  await expect(page.getByRole("button", { name: "导入视频" })).toBeDisabled();
+  await expect(
+    page.getByText("Today we practice offline listening.", { exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("link", { name: /继续学习/ }).click();
+  await expect(
+    page.getByText("Today we practice offline listening.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Local Revision", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("学习者提供的 Caption Source · VTT", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("note").filter({ hasText: "当前离线，YouTube 视频无法播放" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "播放第 2 句" })).toBeDisabled();
+
+  let remoteLookupRequests = 0;
+  await page.route("**/api/dictionary**", async (route) => {
+    remoteLookupRequests += 1;
+    await route.abort();
+  });
+  await page.route("**/api/word-lookup/ai", async (route) => {
+    remoteLookupRequests += 1;
+    await route.abort();
+  });
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: practice" });
+  await expect(lookup.getByText("本地缓存", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("AI 本地缓存", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.getByRole("button", { name: "查询 Welcome" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: Welcome" });
+  await expect(lookup.getByRole("alert")).toContainText(
+    "当前离线，而且没有这个 Word Lookup 的本地缓存",
+  );
+  expect(remoteLookupRequests).toBe(0);
 });
 
 test("learner imports a Study Video with a VTT Caption Source", async ({

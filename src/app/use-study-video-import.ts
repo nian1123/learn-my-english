@@ -21,6 +21,7 @@ import {
   studyVideoIdFor,
 } from "@/domain/study-video";
 import {
+  canonicalYouTubeVideoUrl,
   isYouTubeVideoId,
   parseYouTubeVideoUrl,
   YouTubeUrlError,
@@ -30,6 +31,7 @@ import { useStudyLibraryClient } from "./study-library-client-context";
 import type { PlayerReadiness } from "./youtube-player";
 
 const MAXIMUM_DURATION_SECONDS = 3 * 60 * 60;
+const MAXIMUM_CAPTION_SOURCE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_CAPTION_CONTENT_TYPES = new Set([
   "application/srt",
   "application/x-subrip",
@@ -49,6 +51,10 @@ type ImportStage =
   | "error";
 
 type ImportProgressStage = Exclude<ImportStage, "error" | "idle">;
+export type ImportDelayLevel = "normal" | "slow" | "prolonged";
+
+const SLOW_IMPORT_THRESHOLD_MS = 30_000;
+const PROLONGED_IMPORT_THRESHOLD_MS = 60_000;
 
 export type PendingStudyVideoImport = {
   metadata: YouTubeVideoMetadata;
@@ -97,6 +103,28 @@ function responseError(value: unknown): string {
   return "读取视频信息失败，请稍后重试。";
 }
 
+function isSafeRemoteUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2_048) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isProviderLabel(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    Boolean(value.trim()) &&
+    value.length <= 500
+  );
+}
+
 function metadataResponse(
   value: unknown,
   expectedVideoId: YouTubeVideoId,
@@ -108,10 +136,10 @@ function metadataResponse(
     typeof candidate.videoId !== "string" ||
     !isYouTubeVideoId(candidate.videoId) ||
     candidate.videoId !== expectedVideoId ||
-    typeof candidate.canonicalUrl !== "string" ||
-    typeof candidate.title !== "string" ||
-    typeof candidate.channel !== "string" ||
-    typeof candidate.thumbnailUrl !== "string"
+    candidate.canonicalUrl !== canonicalYouTubeVideoUrl(expectedVideoId) ||
+    !isProviderLabel(candidate.title) ||
+    !isProviderLabel(candidate.channel) ||
+    !isSafeRemoteUrl(candidate.thumbnailUrl)
   ) {
     return null;
   }
@@ -119,8 +147,8 @@ function metadataResponse(
   return {
     videoId: candidate.videoId,
     canonicalUrl: candidate.canonicalUrl,
-    title: candidate.title,
-    channel: candidate.channel,
+    title: candidate.title.trim(),
+    channel: candidate.channel.trim(),
     thumbnailUrl: candidate.thumbnailUrl,
   };
 }
@@ -131,7 +159,10 @@ function captionAcquisitionResponse(value: unknown): CaptionAcquisition | null {
 
   if (
     typeof candidate.contents !== "string" ||
+    new Blob([candidate.contents]).size > MAXIMUM_CAPTION_SOURCE_BYTES ||
     typeof candidate.fileName !== "string" ||
+    candidate.fileName.length > 255 ||
+    /[/\\]/.test(candidate.fileName) ||
     (candidate.format !== "srt" && candidate.format !== "vtt") ||
     (candidate.kind !== "manual" && candidate.kind !== "auto-generated") ||
     !candidate.fileName.toLowerCase().endsWith(`.${candidate.format}`)
@@ -147,9 +178,27 @@ function captionAcquisitionResponse(value: unknown): CaptionAcquisition | null {
   };
 }
 
+function validateCaptionDuration(
+  captionSource: CaptionSource,
+  durationSeconds: number,
+) {
+  if (
+    captionSource.cues.some(
+      (cue) =>
+        cue.startSeconds >= durationSeconds ||
+        cue.endSeconds > durationSeconds,
+    )
+  ) {
+    throw new CaptionSourceParseError(
+      "Caption Source 的时间范围超出视频时长。请检查它是否属于这个 Study Video。",
+    );
+  }
+  return captionSource;
+}
+
 export function useStudyVideoImport() {
   const router = useRouter();
-  const { persistenceStatus } = useStudyLibraryClient();
+  const { networkStatus, persistenceStatus } = useStudyLibraryClient();
   const [videoUrl, setVideoUrl] = useState("");
   const [captionFile, setCaptionFile] = useState<File | null>(null);
   const [stage, setStage] = useState<ImportStage>("idle");
@@ -161,8 +210,63 @@ export function useStudyVideoImport() {
     useState<PendingStudyVideoImport | null>(null);
   const [manualFallback, setManualFallback] =
     useState<ValidatedStudyVideoImport | null>(null);
+  const [delayLevel, setDelayLevel] =
+    useState<ImportDelayLevel>("normal");
   const abortControllerRef = useRef<AbortController | null>(null);
   const importActiveRef = useRef(false);
+  const validatedCandidateRef = useRef<ValidatedStudyVideoImport | null>(null);
+  const importing = stage !== "idle" && stage !== "error";
+
+  useEffect(() => {
+    if (!importing) {
+      setDelayLevel("normal");
+      return;
+    }
+
+    const slowTimer = window.setTimeout(
+      () => setDelayLevel("slow"),
+      SLOW_IMPORT_THRESHOLD_MS,
+    );
+    const prolongedTimer = window.setTimeout(
+      () => setDelayLevel("prolonged"),
+      PROLONGED_IMPORT_THRESHOLD_MS,
+    );
+    return () => {
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(prolongedTimer);
+    };
+  }, [importing]);
+
+  useEffect(() => {
+    if (
+      networkStatus !== "offline" ||
+      !importActiveRef.current ||
+      !["reading-metadata", "checking-embed", "acquiring-captions"].includes(
+        stage,
+      )
+    ) {
+      return;
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    importActiveRef.current = false;
+    setPendingImport(null);
+    const validatedCandidate = validatedCandidateRef.current;
+    if (validatedCandidate) {
+      setManualFallback(validatedCandidate);
+      setStage("error");
+      setError(
+        "网络连接已断开，自动获取已停止。可以上传本地 VTT/SRT Caption Source 继续。",
+      );
+      setYouTubeOpenUrl(validatedCandidate.metadata.canonicalUrl);
+      return;
+    }
+    setManualFallback(null);
+    setStage("error");
+    setError("网络连接已断开，导入已经停止，没有创建任何 Study Video。");
+    setYouTubeOpenUrl(null);
+  }, [networkStatus, stage]);
 
   useEffect(
     () => () => {
@@ -191,6 +295,7 @@ export function useStudyVideoImport() {
 
   const failImport = (message: string, openUrl?: string) => {
     importActiveRef.current = false;
+    validatedCandidateRef.current = null;
     setPendingImport(null);
     setManualFallback(null);
     setStage("error");
@@ -203,6 +308,7 @@ export function useStudyVideoImport() {
     candidate: ValidatedStudyVideoImport,
   ) => {
     importActiveRef.current = false;
+    validatedCandidateRef.current = candidate;
     setPendingImport(null);
     setManualFallback(candidate);
     setStage("error");
@@ -231,6 +337,7 @@ export function useStudyVideoImport() {
       learningSentences,
     });
     importActiveRef.current = false;
+    validatedCandidateRef.current = null;
     setManualFallback(null);
     router.push(`/study/${encodeURIComponent(studyVideoId)}`);
   };
@@ -243,6 +350,10 @@ export function useStudyVideoImport() {
 
     if (persistenceStatus !== "available") {
       failImport("本地数据尚未就绪，请刷新页面后重试。");
+      return;
+    }
+    if (networkStatus !== "online") {
+      failImport("当前离线，无法导入新的 Study Video。请联网后重试。");
       return;
     }
 
@@ -305,6 +416,7 @@ export function useStudyVideoImport() {
     }
 
     const validatedCandidate = { ...candidate, durationSeconds };
+    validatedCandidateRef.current = validatedCandidate;
     let persistenceStarted = false;
     try {
       const abortController = abortControllerRef.current;
@@ -333,11 +445,14 @@ export function useStudyVideoImport() {
       }
 
       await paintImportStage("parsing-captions");
-      const captionSource = parseCaptionSource(
-        captionSourceIdFor(candidate.metadata.videoId),
-        acquisition.fileName,
-        acquisition.contents,
-        acquisition.kind,
+      const captionSource = validateCaptionDuration(
+        parseCaptionSource(
+          captionSourceIdFor(candidate.metadata.videoId),
+          acquisition.fileName,
+          acquisition.contents,
+          acquisition.kind,
+        ),
+        validatedCandidate.durationSeconds,
       );
       await paintImportStage("generating-sentences");
       const learningSentences = learningSentencesFromCues(captionSource);
@@ -380,6 +495,14 @@ export function useStudyVideoImport() {
       return;
     }
 
+    if (captionFile.size > MAXIMUM_CAPTION_SOURCE_BYTES) {
+      offerManualFallback(
+        "Caption Source 超过 10 MB，请选择更小的 VTT 或 SRT 文本文件。",
+        candidate,
+      );
+      return;
+    }
+
     if (
       captionFile.type &&
       !SUPPORTED_CAPTION_CONTENT_TYPES.has(captionFile.type.toLowerCase())
@@ -395,10 +518,13 @@ export function useStudyVideoImport() {
     let persistenceStarted = false;
     try {
       await paintImportStage("parsing-captions");
-      const captionSource = parseLearnerCaptionSource(
-        captionSourceIdFor(candidate.metadata.videoId),
-        captionFile.name,
-        await captionFile.text(),
+      const captionSource = validateCaptionDuration(
+        parseLearnerCaptionSource(
+          captionSourceIdFor(candidate.metadata.videoId),
+          captionFile.name,
+          await captionFile.text(),
+        ),
+        candidate.durationSeconds,
       );
       await paintImportStage("generating-sentences");
       const learningSentences = learningSentencesFromCues(captionSource);
@@ -418,6 +544,17 @@ export function useStudyVideoImport() {
         );
       }
     }
+  };
+
+  const switchToManualCaption = () => {
+    const candidate = validatedCandidateRef.current;
+    if (!candidate || stage !== "acquiring-captions") return;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    offerManualFallback(
+      "已停止自动字幕获取。请选择本地 VTT/SRT Caption Source 继续；尚未创建 Study Video。",
+      candidate,
+    );
   };
 
   const handlePlayerError = (code: number) => {
@@ -441,6 +578,7 @@ export function useStudyVideoImport() {
     importActiveRef.current = false;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    validatedCandidateRef.current = null;
     setPendingImport(null);
     setManualFallback(null);
     setCaptionFile(null);
@@ -449,20 +587,25 @@ export function useStudyVideoImport() {
     resetError();
   };
 
-  const importing = stage !== "idle" && stage !== "error";
   const progressMessage = importing
     ? STAGE_COPY[stage as ImportProgressStage]
     : null;
 
   return {
     cancelImport,
+    canSwitchToManualCaption:
+      delayLevel === "prolonged" &&
+      stage === "acquiring-captions" &&
+      validatedCandidateRef.current !== null,
     continueWithManualCaption,
     error,
     finishImport,
     handlePlayerError,
     importing,
+    delayLevel,
     lastProgressStage,
     manualFallbackAvailable: manualFallback !== null,
+    networkStatus,
     pendingImport,
     persistenceStatus,
     progressMessage,
@@ -470,6 +613,7 @@ export function useStudyVideoImport() {
     setVideoUrl,
     stage,
     startImport,
+    switchToManualCaption,
     videoUrl,
     youtubeOpenUrl,
   };

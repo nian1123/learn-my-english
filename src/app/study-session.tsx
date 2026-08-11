@@ -29,6 +29,7 @@ import type { WordLookupRequest } from "@/domain/word-lookup";
 
 import { LearningSentenceText } from "./learning-sentence-text";
 import { LearningSentenceEditor } from "./learning-sentence-editor";
+import { useStudyLibraryClient } from "./study-library-client-context";
 import { WordLookupDrawer } from "./word-lookup-drawer";
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
 
@@ -41,6 +42,8 @@ export function StudySession({
   studyVideoId: StudyVideoId;
   targetSentenceId?: string;
 }) {
+  const { networkStatus } = useStudyLibraryClient();
+  const networkAvailable = networkStatus === "online";
   const [studyVideo, setStudyVideo] = useState<StudyVideo | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -153,6 +156,13 @@ export function StudySession({
   }, [studyVideoId]);
 
   useEffect(() => {
+    if (networkStatus !== "offline") return;
+    setRepeatSentenceId(null);
+    setSupportedPlaybackRates([]);
+    setPlayerError(null);
+  }, [networkStatus]);
+
+  useEffect(() => {
     if (!activeSentenceId) return;
     activeSentenceRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeSentenceId]);
@@ -161,7 +171,8 @@ export function StudySession({
     if (
       restoredWordBankTargetRef.current ||
       !studyVideo ||
-      !targetSentenceId
+      !targetSentenceId ||
+      networkStatus === "checking"
     ) {
       return;
     }
@@ -176,13 +187,23 @@ export function StudySession({
     }
     selectedSentenceIdRef.current = sentence.id;
     setActiveSentenceId(sentence.id);
-    if (autoplayTarget) playerRef.current?.playFrom(sentence.startSeconds);
+    if (autoplayTarget && networkAvailable) {
+      playerRef.current?.playFrom(sentence.startSeconds);
+    }
     setWordBankReturnMessage(
       autoplayTarget
-        ? `已从 Word Bank 返回并播放第 ${sentenceIndex + 1} 句`
+        ? networkAvailable
+          ? `已从 Word Bank 返回并播放第 ${sentenceIndex + 1} 句`
+          : `已从 Word Bank 返回第 ${sentenceIndex + 1} 句；当前离线，未播放视频`
         : `已从 Word Bank 返回第 ${sentenceIndex + 1} 句`,
     );
-  }, [autoplayTarget, learningSentences, studyVideo, targetSentenceId]);
+  }, [
+    autoplayTarget,
+    learningSentences,
+    networkAvailable,
+    studyVideo,
+    targetSentenceId,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -234,6 +255,7 @@ export function StudySession({
   }
 
   const playSentence = (sentence: LearningSentence) => {
+    if (!networkAvailable) return;
     selectedSentenceIdRef.current = sentence.id;
     setActiveSentenceId(sentence.id);
     if (repeatSentenceId) {
@@ -258,6 +280,7 @@ export function StudySession({
     if (nextSentence) playSentence(nextSentence);
   };
   const toggleRepeat = () => {
+    if (!networkAvailable) return;
     if (repeatSentenceId) {
       setRepeatSentenceId(null);
       playerRef.current?.setRepeatInterval(null);
@@ -393,20 +416,33 @@ export function StudySession({
           </p>
         ) : null}
         <section className="player-column" aria-label="YouTube 播放器">
-          <YouTubePlayer
-            className="study-player"
-            initialPositionSeconds={studyVideo.lastPositionSeconds}
-            onError={(code) =>
-              setPlayerError(`YouTube 播放器无法载入（错误 ${code}）。`)
-            }
-            onPlaybackRateChange={setPlaybackRate}
-            onPlaybackRatesChange={setSupportedPlaybackRates}
-            onPositionChange={persistPosition}
-            onRepeatGapChange={setInRepeatGap}
-            onTimeChange={syncActiveSentence}
-            ref={playerRef}
-            videoId={studyVideo.youtubeVideoId}
-          />
+          {networkAvailable ? (
+            <YouTubePlayer
+              className="study-player"
+              initialPositionSeconds={studyVideo.lastPositionSeconds}
+              onError={(code) =>
+                setPlayerError(`YouTube 播放器无法载入（错误 ${code}）。`)
+              }
+              onPlaybackRateChange={setPlaybackRate}
+              onPlaybackRatesChange={setSupportedPlaybackRates}
+              onPositionChange={persistPosition}
+              onRepeatGapChange={setInRepeatGap}
+              onTimeChange={syncActiveSentence}
+              ref={playerRef}
+              videoId={studyVideo.youtubeVideoId}
+            />
+          ) : networkStatus === "offline" ? (
+            <div className="study-player study-player-offline" role="note">
+              <strong>当前离线，YouTube 视频无法播放</strong>
+              <span>
+                本地 Caption Source、Learning Sentences、Local Revisions 和缓存的 Word Lookup 仍可查看。
+              </span>
+            </div>
+          ) : (
+            <div className="study-player study-player-offline" role="status">
+              <strong>正在确认网络状态…</strong>
+            </div>
+          )}
           {playerError ? (
             <p className="study-player-error" role="alert">
               {playerError}
@@ -420,7 +456,7 @@ export function StudySession({
           </div>
           <div className="listening-controls" aria-label="逐句播放控制">
             <button
-              disabled={selectedSentenceIndex === 0}
+              disabled={!networkAvailable || selectedSentenceIndex === 0}
               onClick={() => playAdjacentSentence(-1)}
               type="button"
             >
@@ -428,6 +464,7 @@ export function StudySession({
             </button>
             <button
               disabled={
+                !networkAvailable ||
                 selectedSentenceIndex ===
                 learningSentences.length - 1
               }
@@ -439,6 +476,7 @@ export function StudySession({
             <button
               aria-pressed={repeatSentenceId !== null}
               className={repeatSentenceId ? "active" : undefined}
+              disabled={!networkAvailable}
               onClick={toggleRepeat}
               type="button"
             >
@@ -461,6 +499,7 @@ export function StudySession({
                   aria-pressed={playbackRate === rate}
                   className={playbackRate === rate ? "active" : undefined}
                   key={rate}
+                  disabled={!networkAvailable}
                   onClick={() => playerRef.current?.setPlaybackRate(rate)}
                   type="button"
                 >
@@ -528,6 +567,7 @@ export function StudySession({
                           ? "learning-sentence active"
                           : "learning-sentence"
                       }
+                      disabled={!networkAvailable}
                       onClick={() => playSentence(sentence)}
                       ref={
                         activeSentenceId === sentence.id

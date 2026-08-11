@@ -28,6 +28,10 @@ function unavailable(
   };
 }
 
+function browserIsOffline() {
+  return typeof navigator !== "undefined" && !navigator.onLine;
+}
+
 async function requestWordLookupAi(
   payload: ReturnType<typeof createWordLookupAiRequest>,
   allowDeepSeekFallback: boolean,
@@ -85,6 +89,7 @@ export async function loadWordLookupAiEnrichment(
   ) {
     return { response: cached, source: "cache" };
   }
+  if (browserIsOffline()) return unavailable("offline");
 
   const response = await requestWordLookupAi(
     payload,
@@ -135,6 +140,7 @@ export async function loadWordLookupAiTranslation(
   if (cached?.mode === "local-ai" && cached.task === "translate") {
     return { response: cached, source: "cache" };
   }
+  if (browserIsOffline()) return unavailable("offline");
 
   const response = await requestWordLookupAi(
     payload,

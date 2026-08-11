@@ -8,6 +8,7 @@ import type {
 } from "@/domain/word-lookup";
 
 const PROVIDER_TIMEOUT_MS = 4_000;
+const MAXIMUM_PROVIDER_RESPONSE_LENGTH = 1_000_000;
 
 type ProviderPhonetic = {
   text?: unknown;
@@ -168,9 +169,19 @@ export async function lookupFreeDictionary(
   if (response.status === 404) return { status: "not-found" };
   if (!response.ok) throw new DictionaryProviderUnavailableError();
 
+  let responseText: string;
+  try {
+    responseText = await response.text();
+  } catch {
+    throw new DictionaryProviderUnavailableError();
+  }
+  if (responseText.length > MAXIMUM_PROVIDER_RESPONSE_LENGTH) {
+    throw new DictionaryProviderUnavailableError();
+  }
+
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = JSON.parse(responseText);
   } catch {
     throw new DictionaryProviderUnavailableError();
   }

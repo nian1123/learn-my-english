@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
-import { StudyLibraryClientProvider } from "./study-library-client-context";
+import {
+  ConnectivityAlert,
+  StudyLibraryClientProvider,
+} from "./study-library-client-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,7 +24,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <a className="skip-link" href="#main-content">
           跳到主要内容
         </a>
-        <StudyLibraryClientProvider>{children}</StudyLibraryClientProvider>
+        <StudyLibraryClientProvider>
+          <ConnectivityAlert />
+          {children}
+        </StudyLibraryClientProvider>
       </body>
     </html>
   );

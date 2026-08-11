@@ -46,6 +46,10 @@ DEEPSEEK_MODEL=
 
 “设置与诊断”可以导出 schema version 1 的 JSON 备份，覆盖 Study Library、Caption Sources、Learning Sentences、本地修订、学习进度、学习偏好、DeepSeek 同意状态、Word Lookup 缓存和 Word Bank。备份不包含 API 密钥、服务端环境配置或音视频文件。恢复前会完整校验文件；“合并”遇到同一标识但内容不同会停止整个事务，“替换”会原子清空并写入备份，因此无效、不兼容或冲突的文件都不会留下部分修改。
 
+浏览器报告离线时，应用会停止 YouTube 播放、新 Study Video 导入以及未缓存的词典和 AI 请求，并明确显示限制；本地 Study Library、Caption Sources、Learning Sentences、Local Revisions、Word Lookup 缓存和 Word Bank 仍可查看，Local Revision 等本地操作仍可继续。已有缓存总是先于 provider 请求读取，因此 provider 停止后不会遮住已保存内容。
+
+导入始终保留当前处理阶段。等待外部服务超过 30 秒会显示变慢提示；超过 60 秒时会强调取消操作，并在字幕获取阶段允许直接改用本地 VTT/SRT。Caption Source 限制为 10 MB，其时间轴必须位于视频时长内；provider 元数据中的地址也只接受无内嵌凭据的 HTTP(S) URL。取消、离线中断、provider 失败、无效响应和保存失败都不会创建部分 Study Video。
+
 ## 字幕获取边界
 
 Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。

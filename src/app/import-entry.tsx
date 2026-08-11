@@ -20,13 +20,16 @@ export function ImportEntry() {
   const videoUrlRef = useRef<HTMLInputElement>(null);
   const {
     cancelImport,
+    canSwitchToManualCaption,
     continueWithManualCaption,
+    delayLevel,
     error,
     finishImport,
     handlePlayerError,
     importing,
     lastProgressStage,
     manualFallbackAvailable,
+    networkStatus,
     pendingImport,
     persistenceStatus,
     progressMessage,
@@ -34,9 +37,13 @@ export function ImportEntry() {
     setVideoUrl,
     stage,
     startImport,
+    switchToManualCaption,
     videoUrl,
     youtubeOpenUrl,
   } = useStudyVideoImport();
+  const currentStageLabel = IMPORT_STEPS.find(
+    (candidate) => candidate.id === lastProgressStage,
+  )?.label;
 
   useEffect(() => {
     if (!showImport) return;
@@ -66,17 +73,27 @@ export function ImportEntry() {
 
   return (
     <>
-      <button
-        aria-expanded={showImport}
-        aria-haspopup="dialog"
-        className="import-trigger"
-        disabled={persistenceStatus !== "available"}
-        onClick={() => setShowImport(true)}
-        type="button"
-      >
-        <span aria-hidden="true">＋</span>
-        导入视频
-      </button>
+      <div className="import-entry-action">
+        <button
+          aria-describedby={
+            networkStatus === "offline" ? "offline-import-reason" : undefined
+          }
+          aria-expanded={showImport}
+          aria-haspopup="dialog"
+          className="import-trigger"
+          disabled={
+            persistenceStatus !== "available" || networkStatus !== "online"
+          }
+          onClick={() => setShowImport(true)}
+          type="button"
+        >
+          <span aria-hidden="true">＋</span>
+          导入视频
+        </button>
+        {networkStatus === "offline" ? (
+          <small id="offline-import-reason">离线时不能导入新的 Study Video</small>
+        ) : null}
+      </div>
 
       {showImport ? (
         <dialog
@@ -123,7 +140,11 @@ export function ImportEntry() {
                 <label htmlFor="youtube-url">YouTube 视频链接</label>
               </div>
               <input
-                disabled={persistenceStatus === "unavailable" || importing}
+                disabled={
+                  persistenceStatus === "unavailable" ||
+                  networkStatus !== "online" ||
+                  importing
+                }
                 id="youtube-url"
                 inputMode="url"
                 name="youtube-url"
@@ -198,6 +219,18 @@ export function ImportEntry() {
                 <p>{progressMessage}</p>
               </div>
             ) : null}
+            {delayLevel === "slow" ? (
+              <p className="import-delay-notice" role="status">
+                外部服务响应较慢；当前仍在{currentStageLabel ?? "处理"}，阶段信息会持续保留。
+              </p>
+            ) : null}
+            {delayLevel === "prolonged" ? (
+              <p className="import-delay-alert" role="alert">
+                已等待超过 60 秒。可以取消当前操作
+                {canSwitchToManualCaption ? "或改用字幕文件" : "后重试"}
+                ；中止不会创建部分 Study Video。
+              </p>
+            ) : null}
             {error ? (
               <div className="import-error" role="alert">
                 <span>{error}</span>
@@ -238,6 +271,15 @@ export function ImportEntry() {
                     稍后再说
                   </button>
                 )}
+                {canSwitchToManualCaption ? (
+                  <button
+                    className="manual-switch-button"
+                    onClick={switchToManualCaption}
+                    type="button"
+                  >
+                    改用字幕文件
+                  </button>
+                ) : null}
                 {manualFallbackAvailable ? (
                   <button
                     disabled={importing}
@@ -248,7 +290,11 @@ export function ImportEntry() {
                   </button>
                 ) : (
                   <button
-                    disabled={persistenceStatus !== "available" || importing}
+                    disabled={
+                      persistenceStatus !== "available" ||
+                      networkStatus !== "online" ||
+                      importing
+                    }
                     type="submit"
                   >
                     {stage === "saving" ? "正在保存" : "开始导入"}

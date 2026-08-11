@@ -18,8 +18,10 @@ import {
 
 type PersistenceStatus = "checking" | "available" | "unavailable";
 type PreferenceStatus = "loading" | "idle" | "saving" | "saved" | "error";
+export type NetworkStatus = "checking" | "online" | "offline";
 
 type StudyLibraryClientState = {
+  networkStatus: NetworkStatus;
   persistenceStatus: PersistenceStatus;
   preferences: LearnerPreferences;
   preferenceStatus: PreferenceStatus;
@@ -55,6 +57,22 @@ export function StudyLibraryClientProvider({
   );
   const [preferenceStatus, setPreferenceStatus] =
     useState<PreferenceStatus>("loading");
+  const [networkStatus, setNetworkStatus] =
+    useState<NetworkStatus>("checking");
+
+  useEffect(() => {
+    const updateNetworkStatus = () => {
+      setNetworkStatus(window.navigator.onLine ? "online" : "offline");
+    };
+
+    updateNetworkStatus();
+    window.addEventListener("online", updateNetworkStatus);
+    window.addEventListener("offline", updateNetworkStatus);
+    return () => {
+      window.removeEventListener("online", updateNetworkStatus);
+      window.removeEventListener("offline", updateNetworkStatus);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -100,6 +118,7 @@ export function StudyLibraryClientProvider({
   return (
     <StudyLibraryClientContext.Provider
       value={{
+        networkStatus,
         persistenceStatus,
         preferences,
         preferenceStatus,
@@ -109,5 +128,21 @@ export function StudyLibraryClientProvider({
     >
       {children}
     </StudyLibraryClientContext.Provider>
+  );
+}
+
+export function ConnectivityAlert() {
+  const { networkStatus } = useStudyLibraryClient();
+  if (networkStatus !== "offline") return null;
+
+  return (
+    <div aria-live="polite" className="connectivity-alert" role="status">
+      <strong>离线模式</strong>
+      <span>
+        可继续查看并编辑本地 Study Library、Caption Sources、Learning
+        Sentences、Local Revisions、Word Lookup 缓存和 Word Bank；YouTube
+        播放、导入及新的词典或 AI 请求已停用。
+      </span>
+    </div>
   );
 }

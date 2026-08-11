@@ -31,6 +31,7 @@ export type WordLookupAiTranslation = {
 };
 
 export type WordLookupAiUnavailableReason =
+  | "offline"
   | "not-configured"
   | "timeout"
   | "invalid-output"
@@ -256,6 +257,7 @@ export function isWordLookupAiResponse(
       hasOnlyKeys(candidate, ["status", "mode", "reason"]) &&
       candidate.mode === "dictionary-only" &&
       [
+        "offline",
         "not-configured",
         "timeout",
         "invalid-output",
