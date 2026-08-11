@@ -26,6 +26,7 @@ npm run dev
 | `DICTIONARY_API_BASE_URL` | 基础英文词典 | 是；示例已给出公共服务 |
 | `YOUTUBE_OEMBED_BASE_URL` | 读取公开 YouTube 元数据 | 是；示例已给出官方端点 |
 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | 本地 OpenAI 兼容服务 | 否；三项必须一起配置 |
+| `OPENAI_TIMEOUT_MS` | 本地 AI 单次请求超时（毫秒） | 否；默认 15000，可设为 100–30000 |
 | `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | 经同意后的云端回退 | 否；三项必须一起配置 |
 
 不要把 `.env.local` 提交到版本库。修改配置后重启开发服务，再到“设置与诊断”重新检查状态。
@@ -48,6 +49,7 @@ npm run dev
 OPENAI_BASE_URL=http://localhost:51448/v1
 OPENAI_API_KEY=
 OPENAI_MODEL=
+OPENAI_TIMEOUT_MS=15000
 
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_KEY=

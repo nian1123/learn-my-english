@@ -1601,6 +1601,41 @@ test("local AI selects a supplied dictionary sense without blurring source bound
   expect(deepSeekRequests.items).toHaveLength(0);
 });
 
+test("default Local AI timeout accommodates a five-second cold start", async ({
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+
+  const response = await request.post(
+    "http://127.0.0.1:3105/api/word-lookup/ai",
+    {
+      data: {
+        allowDeepSeekFallback: false,
+        lookup: {
+          task: "enrich",
+          expression: "cold-start",
+          sentence: "A cold-start request can take more than five seconds.",
+          senses: [
+            {
+              id: "0:0:0",
+              partOfSpeech: "noun",
+              definition: "The initial startup period of a local service.",
+            },
+          ],
+        },
+      },
+      timeout: 10_000,
+    },
+  );
+
+  expect(response.status()).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    status: "available",
+    mode: "local-ai",
+    task: "enrich",
+  });
+});
+
 test("first DeepSeek fallback explains cloud data and remembers a refusal", async ({
   page,
   request,

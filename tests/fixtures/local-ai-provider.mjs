@@ -123,6 +123,22 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (data.expression === "cold-start") {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          completion({
+            senseId: "0:0:0",
+            auxiliaryExample:
+              "A brief warm-up helps the local model answer reliably.",
+          }),
+        ),
+      );
+    }, 5_200);
+    return;
+  }
+
   const result =
     data.task === "translate"
       ? { chineseMeaning: "练习；实践" }

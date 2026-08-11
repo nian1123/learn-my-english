@@ -33,6 +33,11 @@ const localOnlyAiEnvironment = {
   DEEPSEEK_MODEL: "",
 };
 
+const defaultTimeoutLocalAiEnvironment = {
+  ...localOnlyAiEnvironment,
+  OPENAI_TIMEOUT_MS: "",
+};
+
 function applicationServer(
   port: number,
   aiEnvironment: Record<string, string>,
@@ -103,5 +108,6 @@ export default defineConfig({
       CAPTION_PROVIDER_TIMEOUT_MS: "500",
     }),
     applicationServer(3104, localOnlyAiEnvironment),
+    applicationServer(3105, defaultTimeoutLocalAiEnvironment),
   ],
 });

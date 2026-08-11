@@ -12,7 +12,7 @@ import {
   type WordLookupProviderConfiguration,
 } from "./openai-compatible-word-lookup";
 
-const DEFAULT_PROVIDER_TIMEOUT_MS = 5_000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 
 export { WordLookupProviderError as LocalAiProviderError };
 
