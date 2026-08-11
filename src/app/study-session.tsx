@@ -30,8 +30,32 @@ import type { WordLookupRequest } from "@/domain/word-lookup";
 import { LearningSentenceText } from "./learning-sentence-text";
 import { LearningSentenceEditor } from "./learning-sentence-editor";
 import { useStudyLibraryClient } from "./study-library-client-context";
+import { VirtualizedLearningSentenceList } from "./virtualized-learning-sentence-list";
 import { WordLookupDrawer } from "./word-lookup-drawer";
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
+
+function sentenceAtPosition(
+  sentences: readonly LearningSentence[],
+  positionSeconds: number,
+) {
+  let lower = 0;
+  let upper = sentences.length - 1;
+  let candidate: LearningSentence | undefined;
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    const sentence = sentences[middle];
+    if (!sentence) break;
+    if (sentence.startSeconds <= positionSeconds) {
+      candidate = sentence;
+      lower = middle + 1;
+    } else {
+      upper = middle - 1;
+    }
+  }
+  return candidate && positionSeconds < candidate.endSeconds
+    ? candidate
+    : undefined;
+}
 
 export function StudySession({
   autoplayTarget = false,
@@ -115,11 +139,7 @@ export function StudySession({
       }
 
       const nextActiveSentenceId =
-        learningSentences.find(
-          (sentence) =>
-            positionSeconds >= sentence.startSeconds &&
-            positionSeconds < sentence.endSeconds,
-        )?.id ?? null;
+        sentenceAtPosition(learningSentences, positionSeconds)?.id ?? null;
 
       if (nextActiveSentenceId) {
         selectedSentenceIdRef.current = nextActiveSentenceId;
@@ -543,15 +563,16 @@ export function StudySession({
               {selectionError}
             </p>
           ) : null}
-          <ol
+          <VirtualizedLearningSentenceList
+            activeIndex={activeSentenceIndex}
             className={
               transcriptHidden
                 ? "sentence-list transcript-hidden"
                 : "sentence-list"
             }
-          >
-            {learningSentences.map((sentence, index) => (
-              <li className="learning-sentence-item" key={sentence.id}>
+            items={learningSentences}
+            renderItem={(sentence, index) => (
+              <>
                 <div className="learning-sentence-row">
                   <div
                     className={
@@ -611,9 +632,9 @@ export function StudySession({
                     sentence={sentence}
                   />
                 ) : null}
-              </li>
-            ))}
-          </ol>
+              </>
+            )}
+          />
         </section>
         {wordLookupRequest && wordLookupOriginSentence ? (
           <WordLookupDrawer

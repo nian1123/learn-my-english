@@ -1861,6 +1861,33 @@ footer {
   list-style: none;
 }
 
+.virtualized-sentence-viewport {
+  height: min(68dvh, 720px);
+  min-height: 420px;
+  margin-top: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #2a354d transparent;
+  scrollbar-width: thin;
+  contain: strict;
+}
+
+.sentence-list.virtualized-sentence-list {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+.virtualized-sentence-row {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  width: 100%;
+  will-change: transform;
+}
+
 .sentence-list.transcript-hidden .learning-sentence-text {
   visibility: hidden;
 }

@@ -2,17 +2,33 @@
 
 一个本地优先的美式英语听力学习应用。粘贴 YouTube URL 后，应用会尝试获取已有英文 Caption Source，也可以在自动获取失败后使用学习者提供的 VTT/SRT，并通过官方 YouTube 嵌入播放器按 Learning Sentence 定位练习。
 
-## 本地启动
+## 从空环境启动
 
-需要 Node.js 20.9 或更高版本和 Google Chrome。`yt-dlp` 只用于尝试自动获取公开字幕：它是非官方、可能失效的可选集成，不影响应用启动。
+需要 [Node.js 20.9 或更高版本](https://nextjs.org/docs/app/getting-started/installation)、npm 和 Google Chrome。先确认版本，再在仓库根目录安装锁定版本的依赖：
 
 ```bash
-npm install
+node --version
+npm --version
+npm ci
 cp .env.example .env.local
 npm run dev
 ```
 
-然后打开 [http://localhost:3000](http://localhost:3000)。点击“设置与诊断”可查看 `yt-dlp`、本地 AI、DeepSeek、基础词典和浏览器本地数据的状态。
+然后打开 [http://localhost:3000](http://localhost:3000)。点击“设置与诊断”，确认基础词典和浏览器本地数据可用；本地 AI 与 DeepSeek 是可选项。
+
+`yt-dlp` 只用于尝试自动获取公开英文字幕：它是非官方、可能随 YouTube 改动而失效的可选集成，不影响应用启动或手动字幕流程。需要自动字幕时，请按 [yt-dlp 官方安装说明](https://github.com/yt-dlp/yt-dlp/wiki/Installation)安装最新稳定版，确认 `yt-dlp --version` 可运行；如果可执行文件不在系统 `PATH`，把 `.env.local` 中的 `YT_DLP_PATH` 改为它的绝对路径。
+
+`.env.local` 中的服务端配置含义如下：
+
+| 配置 | 用途 | 是否必需 |
+| --- | --- | --- |
+| `YT_DLP_PATH` | 自动获取公开英文字幕 | 否；可上传 VTT/SRT 替代 |
+| `DICTIONARY_API_BASE_URL` | 基础英文词典 | 是；示例已给出公共服务 |
+| `YOUTUBE_OEMBED_BASE_URL` | 读取公开 YouTube 元数据 | 是；示例已给出官方端点 |
+| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | 本地 OpenAI 兼容服务 | 否；三项必须一起配置 |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | 经同意后的云端回退 | 否；三项必须一起配置 |
+
+不要把 `.env.local` 提交到版本库。修改配置后重启开发服务，再到“设置与诊断”重新检查状态。
 
 ## 导入第一个 Study Video
 
@@ -21,6 +37,8 @@ npm run dev
 3. 如果自动获取失败、超时或本机缺少 `yt-dlp`，按界面提示上传有效的 `.vtt` 或 `.srt` Caption Source 继续。
 
 导入过程会显示当前阶段。不可嵌入、不是公开内容、超过 3 小时或 Caption Source 损坏时，应用会用中文说明下一步，并且不会留下半成品 Study Video。
+
+首次验证建议使用一个公开、可嵌入、短于 60 分钟且有英文字幕的视频。若自动字幕不可用，选择同一视频的 `.vtt` 或 `.srt` 文件；导入完成后应进入学习页，并能点击句子定位、修改句子、查词和继续上次位置。约 60 分钟与接近 3 小时的字幕会使用窗口化列表，页面不会同时创建数千个句子节点。
 
 ## 可选 AI 配置
 
@@ -54,12 +72,33 @@ DEEPSEEK_MODEL=
 
 Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。
 
-## 验证
+## 确定性验证与发布检查
 
 ```bash
 npm run typecheck
 npm test
-npm run build
+npm run verify:release
 ```
 
-端到端测试会启动真实的生产应用，仅以本地测试服务替换词典和 `yt-dlp` 等外部边界。
+`npm test` 会构建并启动真实的生产应用，但使用本地确定性服务替换词典、YouTube 元数据、`yt-dlp` 和 AI 边界，因此默认测试不依赖网络、真实密钥或第三方响应速度。测试覆盖短视频、约 60 分钟和近 3 小时字幕、完整学习旅程、首查与缓存命中时限，以及浏览器响应、IndexedDB 和备份中不含测试凭证。
+
+`npm run verify:release` 还会执行类型检查、完整端到端测试和静态安全门禁。静态门禁拒绝普通应用日志、客户端读取 AI 密钥，以及生产浏览器资源中的已配置密钥标记。它不会把密钥内容打印出来。
+
+## 可选的真实 provider 检查
+
+真实服务检查有网络、限流、地区、视频可用性、YouTube 改动和 AI 费用等外部变量，所以不会混入默认测试。先用真实 `.env.local` 启动应用，再在另一个终端运行：
+
+```bash
+REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" npm run test:real-providers
+```
+
+所选视频必须公开、可嵌入并有英文字幕。该命令只报告检查名称、耗时和成功/失败，不输出响应正文、URL 中的凭证或 API key；它验证真实 YouTube 元数据、英文 Caption Source 和基础词典，并执行 5 秒元数据/查词与 30 秒字幕目标。
+
+AI 检查必须额外、明确开启；固定请求只包含单词 `practice`、一条示例句和一个词典义项：
+
+```bash
+REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" REAL_LOCAL_AI_CHECK=1 npm run test:real-providers
+REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" REAL_DEEPSEEK_CHECK=1 npm run test:real-providers
+```
+
+检查 DeepSeek 时，运行中的应用必须暂时不配置 Local AI，否则产品的本地优先策略会先使用 Local AI，检查将按预期失败。任何真实检查失败都应先区分应用回归与第三方波动；自动字幕失败仍应回到学习者提供的 VTT/SRT，而不是放宽数据完整性要求。

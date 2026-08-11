@@ -40,6 +40,34 @@ ${Array.from({ length: 30 }, (_, index) => {
 }).join("\n\n")}
 `;
 
+function representativeCaptionSource(
+  sentenceCount: number,
+  durationSeconds: number,
+) {
+  const intervalSeconds = durationSeconds / sentenceCount;
+  const timestamp = (seconds: number) => {
+    const totalMilliseconds = Math.round(seconds * 1_000);
+    const wholeSeconds = Math.floor(totalMilliseconds / 1_000);
+    const hours = Math.floor(wholeSeconds / 3_600);
+    const minutes = Math.floor((wholeSeconds % 3_600) / 60);
+    const secondsWithinMinute = wholeSeconds % 60;
+    const milliseconds = totalMilliseconds % 1_000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secondsWithinMinute).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  };
+
+  return `WEBVTT
+
+${Array.from({ length: sentenceCount }, (_, index) => {
+  const startSeconds = index * intervalSeconds + 0.1;
+  const endSeconds = Math.min(
+    startSeconds + Math.min(1.5, intervalSeconds * 0.8),
+    durationSeconds - 0.05,
+  );
+  return `${timestamp(startSeconds)} --> ${timestamp(endSeconds)}\nPerformance sentence ${index + 1}.`;
+}).join("\n\n")}
+`;
+}
+
 async function installYouTubePlayerBoundary(
   page: Page,
   options: {
@@ -258,6 +286,53 @@ async function setReportedNetworkState(page: Page, online: boolean) {
     });
     window.dispatchEvent(new Event(nextOnline ? "online" : "offline"));
   }, online);
+}
+
+async function activeSentenceLatency(
+  page: Page,
+  sentenceNumber: number,
+  positionSeconds: number,
+) {
+  return page.evaluate(
+    ({ position, sentence }) =>
+      new Promise<number>((resolve, reject) => {
+        const startedAt = performance.now();
+        const active = () =>
+          document
+            .querySelector<HTMLButtonElement>(
+              `[aria-label="播放第 ${sentence} 句"]`,
+            )
+            ?.classList.contains("active") ?? false;
+        const finish = () => {
+          observer.disconnect();
+          window.clearTimeout(timeout);
+          resolve(performance.now() - startedAt);
+        };
+        const observer = new MutationObserver(() => {
+          if (active()) finish();
+        });
+        observer.observe(document.body, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+        });
+        const timeout = window.setTimeout(() => {
+          observer.disconnect();
+          reject(new Error(`第 ${sentence} 句未在 1 秒内变为当前句`));
+        }, 1_000);
+        const changed = Reflect.get(window, "__setYouTubeCurrentTime")(
+          position,
+        );
+        if (!changed) {
+          observer.disconnect();
+          window.clearTimeout(timeout);
+          reject(new Error("测试播放器尚未就绪"));
+        } else if (active()) {
+          finish();
+        }
+      }),
+    { position: positionSeconds, sentence: sentenceNumber },
+  );
 }
 
 test("learner starts automatic caption import with only a YouTube URL", async ({
@@ -651,6 +726,90 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
   );
 });
 
+test("a 60-minute Caption Source stays responsive and has no cumulative sentence drift", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const durationSeconds = 3_600;
+  const captionSource = representativeCaptionSource(1_800, durationSeconds);
+  await installYouTubePlayerBoundary(page, { duration: durationSeconds });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/nocaptions1");
+
+  const importStartedAt = Date.now();
+  await page.getByRole("button", { name: "开始导入" }).click();
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+  expect(Date.now() - importStartedAt).toBeLessThan(5_000);
+  await page.getByLabel("Caption Source 文件").setInputFiles({
+    name: "sixty-minute-interview.vtt",
+    mimeType: "text/vtt",
+    buffer: Buffer.from(captionSource),
+  });
+  await page.getByRole("button", { name: "使用字幕文件继续" }).click();
+  await expect(page.getByText("1800 句", { exact: true })).toBeVisible();
+  expect(Date.now() - importStartedAt).toBeLessThan(30_000);
+
+  const virtualizedList = page.locator(".virtualized-sentence-viewport");
+  await expect(virtualizedList).toBeVisible();
+  expect(await page.locator(".learning-sentence-item").count()).toBeLessThan(80);
+
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  for (let index = 1; index <= 20; index += 1) {
+    await page.getByRole("button", { name: /下一句/ }).click();
+  }
+  const expectedPlaybackCalls = Array.from({ length: 20 }, (_, index) => [
+    { method: "seekTo", seconds: (index + 1) * 2 + 0.1 },
+    { method: "playVideo" },
+  ]).flat();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual(expectedPlaybackCalls);
+
+  const targetingLatencies: number[] = [];
+  for (let index = 0; index < 20; index += 1) {
+    targetingLatencies.push(
+      await activeSentenceLatency(page, index + 1, index * 2 + 0.2),
+    );
+  }
+  expect(Math.max(...targetingLatencies)).toBeLessThan(350);
+});
+
+test("a near-three-hour Caption Source renders only a responsive window", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const durationSeconds = 10_790;
+  const sentenceCount = 5_000;
+  await installYouTubePlayerBoundary(page, { duration: durationSeconds });
+  const importStartedAt = Date.now();
+  await submitStudyVideoImport(page, {
+    contents: representativeCaptionSource(sentenceCount, durationSeconds),
+    fileName: "near-three-hour-interview.vtt",
+  });
+
+  await expect(page.getByText("5000 句", { exact: true })).toBeVisible();
+  expect(Date.now() - importStartedAt).toBeLessThan(30_000);
+  const virtualizedList = page.locator(".virtualized-sentence-viewport");
+  await expect(virtualizedList).toBeVisible();
+  expect(await page.locator(".learning-sentence-item").count()).toBeLessThan(80);
+
+  await virtualizedList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(
+    page.getByText(`Performance sentence ${sentenceCount}.`, { exact: true }),
+  ).toBeVisible();
+  expect(await page.locator(".learning-sentence-item").count()).toBeLessThan(80);
+});
+
 test("normal playback and sentence controls move naturally through the transcript", async ({
   page,
 }) => {
@@ -1036,6 +1195,7 @@ test("clicking a word pauses playback and opens a cached Dictionary lookup", asy
     Reflect.get(window, "__youtubePlayerCalls").splice(0),
   );
 
+  const firstLookupStartedAt = Date.now();
   await page.getByRole("button", { name: "查询 practice" }).click();
   const lookup = page.getByRole("complementary", {
     name: "Word Lookup: practice",
@@ -1062,6 +1222,7 @@ test("clicking a word pauses playback and opens a cached Dictionary lookup", asy
       exact: true,
     }),
   ).toBeVisible();
+  expect(Date.now() - firstLookupStartedAt).toBeLessThan(5_000);
   await expect(lookup.getByText("已确认的美式词典音频")).toBeVisible();
   await expect
     .poll(() =>
@@ -1083,11 +1244,15 @@ test("clicking a word pauses playback and opens a cached Dictionary lookup", asy
     page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
   ).resolves.toEqual([{ method: "pauseVideo" }]);
 
+  await page.route("**/api/dictionary**", (route) => route.abort());
+  await page.route("**/api/word-lookup/ai", (route) => route.abort());
+  const cachedLookupStartedAt = Date.now();
   await page.getByRole("button", { name: "查询 practice" }).click();
   await expect(
     page.getByRole("complementary", { name: "Word Lookup: practice" })
       .getByText("本地缓存", { exact: true }),
   ).toBeVisible();
+  expect(Date.now() - cachedLookupStartedAt).toBeLessThan(1_000);
   const providerRequests = await request
     .get("http://127.0.0.1:4174/requests?term=practice")
     .then((response) => response.json());

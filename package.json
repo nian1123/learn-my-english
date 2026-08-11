@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run test:e2e",
     "test:e2e": "npm run build && playwright test",
-    "test:e2e:ui": "npm run build && playwright test --ui"
+    "test:e2e:ui": "npm run build && playwright test --ui",
+    "test:real-providers": "node scripts/check-real-providers.mjs",
+    "verify:release": "npm run typecheck && npm test && node scripts/check-release-security.mjs"
   },
   "dependencies": {
     "next": "16.3.0",

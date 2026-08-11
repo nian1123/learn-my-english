@@ -359,6 +359,7 @@ export function WordLookupDrawer({
     : "missing";
   const dictionaryLoaded = loaded?.key === lookupKey ? loaded.value : null;
   const currentAiLoaded = aiLoaded?.key === lookupKey ? aiLoaded.value : null;
+  const preferencesLoading = preferenceStatus === "loading";
   const wordBankEntryId = candidate
     ? wordBankEntryIdFor(origin, candidate)
     : "missing";
@@ -410,7 +411,7 @@ export function WordLookupDrawer({
     if (
       !candidate ||
       dictionaryLoaded?.result.status !== "found" ||
-      preferenceStatus === "loading"
+      preferencesLoading
     ) {
       return;
     }
@@ -451,7 +452,7 @@ export function WordLookupDrawer({
     dictionaryLoaded,
     lookupKey,
     preferences.deepSeekCloudConsent,
-    preferenceStatus,
+    preferencesLoading,
     request.sentenceText,
   ]);
 
