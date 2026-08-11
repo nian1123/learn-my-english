@@ -7,9 +7,10 @@ const externalProviderEnvironment = {
 };
 
 const configuredAiEnvironment = {
-  OPENAI_BASE_URL: "http://127.0.0.1:51448/v1",
+  OPENAI_BASE_URL: "http://127.0.0.1:4176/v1",
   OPENAI_API_KEY: "e2e-local-secret",
   OPENAI_MODEL: "e2e-local-model",
+  OPENAI_TIMEOUT_MS: "300",
   DEEPSEEK_BASE_URL: "https://api.deepseek.example",
   DEEPSEEK_API_KEY: "e2e-deepseek-secret",
   DEEPSEEK_MODEL: "e2e-deepseek-model",
@@ -70,6 +71,12 @@ export default defineConfig({
     {
       command: "node tests/fixtures/youtube-metadata-provider.mjs",
       url: "http://127.0.0.1:4175/health",
+      reuseExistingServer: false,
+      timeout: 10_000,
+    },
+    {
+      command: "node tests/fixtures/local-ai-provider.mjs",
+      url: "http://127.0.0.1:4176/health",
       reuseExistingServer: false,
       timeout: 10_000,
     },

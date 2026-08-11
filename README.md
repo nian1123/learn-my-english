@@ -24,7 +24,7 @@ npm run dev
 
 ## 可选 AI 配置
 
-应用默认可连接本地 OpenAI 兼容接口 `http://localhost:51448/v1`，也支持 DeepSeek 作为回退。在 `.env.local` 中填写对应的模型和密钥即可：
+应用可连接本地 OpenAI 兼容接口（示例地址为 `http://localhost:51448/v1`）。Base URL、API key 和模型名必须分别显式配置；应用不会猜测模型。DeepSeek 变量为需要明确同意的云端回退预留：
 
 ```dotenv
 OPENAI_BASE_URL=http://localhost:51448/v1
@@ -36,7 +36,7 @@ DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=
 ```
 
-两套 AI 都未配置时，学习库仍可正常打开。服务端诊断只返回连接状态，不会把密钥发送给浏览器。
+本地 AI 用于从基础词典义项中选择当前语境，并生成单独标识的辅助例句。中文释义默认关闭，只有学习者打开开关后才会请求。AI 未配置、超时、失败或返回无效结构时，Word Lookup 会保留可用的基础词典内容。服务端诊断只返回连接状态，不会把密钥发送给浏览器。
 
 ## 字幕获取边界
 

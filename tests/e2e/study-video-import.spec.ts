@@ -151,12 +151,13 @@ async function submitStudyVideoImport(
     contents?: string;
     fileName?: string;
     mimeType?: string;
+    rootUrl?: string;
     uploadCaption?: boolean;
     videoUrl?: string;
   } = {},
 ) {
   const uploadCaption = fixture.uploadCaption ?? true;
-  await page.goto("/");
+  await page.goto(fixture.rootUrl ?? "/");
   await page.getByRole("button", { name: "导入视频" }).click();
   await page
     .getByLabel("YouTube 视频链接")
@@ -845,7 +846,7 @@ test("the learner can split, merge, and restore all original Learning Sentences"
   ).toBeVisible();
 });
 
-test("clicking a word pauses playback and opens a cached Dictionary-only lookup", async ({
+test("clicking a word pauses playback and opens a cached Dictionary lookup", async ({
   page,
   request,
 }) => {
@@ -861,18 +862,24 @@ test("clicking a word pauses playback and opens a cached Dictionary-only lookup"
     name: "Word Lookup: practice",
   });
   await expect(lookup).toBeVisible();
-  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("Dictionary facts", { exact: true })).toBeVisible();
+  const dictionaryFacts = lookup.getByRole("region", {
+    name: "基础词典事实 practice",
+  });
   await expect(lookup.getByText("原文词形 practice", { exact: true })).toBeVisible();
   await expect(lookup.getByText("词典形式 practice", { exact: true })).toBeVisible();
-  await expect(lookup.getByText("noun", { exact: true })).toBeVisible();
-  await expect(lookup.getByText("/ˈpræk.tɪs/", { exact: true })).toBeVisible();
+  await expect(dictionaryFacts.getByText("noun", { exact: true })).toBeVisible();
   await expect(
-    lookup.getByText("Repetition of an activity to improve a skill.", {
-      exact: true,
-    }),
+    dictionaryFacts.getByText("/ˈpræk.tɪs/", { exact: true }),
   ).toBeVisible();
   await expect(
-    lookup.getByText("Careful listening improves with practice.", {
+    dictionaryFacts.getByText(
+      "Repetition of an activity to improve a skill.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    dictionaryFacts.getByText("Careful listening improves with practice.", {
       exact: true,
     }),
   ).toBeVisible();
@@ -1021,6 +1028,245 @@ Mystery failure arrives.
   await expect
     .poll(() => page.evaluate(() => Reflect.get(window, "__speechCalls")))
     .toEqual([{ lang: "en-US", text: "talk" }]);
+});
+
+test("local AI selects a supplied dictionary sense without blurring source boundaries", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4174/reset");
+  await request.post("http://127.0.0.1:4176/reset");
+  let browserAiResponse = "";
+  page.on("response", async (response) => {
+    if (response.url().endsWith("/api/word-lookup/ai")) {
+      browserAiResponse = await response.text();
+    }
+  });
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  const lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+
+  const dictionaryFacts = lookup.getByRole("region", {
+    name: "基础词典事实 practice",
+  });
+  await expect(
+    dictionaryFacts.getByText(
+      "Repetition of an activity to improve a skill.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+
+  const aiAssistance = lookup.getByRole("region", {
+    name: "Local AI 辅助",
+  });
+  await expect(
+    aiAssistance.getByText("AI 生成例句，不是词典原文", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    aiAssistance.getByText(
+      "Repetition of an activity to improve a skill.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    aiAssistance.getByText(
+      "She improves her pronunciation through daily practice.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+
+  const providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(providerRequests.items).toHaveLength(1);
+  const providerRequest = providerRequests.items[0];
+  expect(providerRequest.authorization).toBe("Bearer e2e-local-secret");
+  expect(providerRequest.body.model).toBe("e2e-local-model");
+  expect(providerRequest.body.response_format).toMatchObject({
+    type: "json_schema",
+    json_schema: { strict: true },
+  });
+  expect(providerRequest.body.messages).toHaveLength(2);
+  const untrustedPayload = JSON.parse(
+    providerRequest.body.messages[1].content.replace(
+      "UNTRUSTED_LOOKUP_DATA=",
+      "",
+    ),
+  );
+  expect(untrustedPayload).toEqual({
+    task: "enrich",
+    expression: "practice",
+    sentence: "Today we're talking about practice.",
+    senses: [
+      {
+        definition: "Repetition of an activity to improve a skill.",
+        id: "0:0:0",
+        partOfSpeech: "noun",
+      },
+    ],
+  });
+  expect(JSON.stringify(providerRequest.body)).not.toContain(
+    "Welcome to the show.",
+  );
+  await expect.poll(() => browserAiResponse).not.toContain("e2e-local-secret");
+
+  const persistedLookupData = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const openRequest = indexedDB.open("learn-my-english", 3);
+      openRequest.onsuccess = () => resolve(openRequest.result);
+      openRequest.onerror = () => reject(openRequest.error);
+    });
+    const values = await new Promise<unknown[]>((resolve, reject) => {
+      const readRequest = database
+        .transaction("word-lookups", "readonly")
+        .objectStore("word-lookups")
+        .getAll();
+      readRequest.onsuccess = () => resolve(readRequest.result);
+      readRequest.onerror = () => reject(readRequest.error);
+    });
+    database.close();
+    return JSON.stringify(values);
+  });
+  expect(persistedLookupData).not.toContain("e2e-local-secret");
+});
+
+test("Chinese meaning is default-off, lazy, and cached separately", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  let chineseToggle = lookup.getByRole("checkbox", {
+    name: "显示中文释义",
+  });
+  await expect(chineseToggle).not.toBeChecked();
+  await expect(lookup.getByText("练习；实践", { exact: true })).toHaveCount(0);
+
+  let providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(providerRequests.items.map((item: { task: string }) => item.task)).toEqual([
+    "enrich",
+  ]);
+
+  await chineseToggle.check();
+  await expect(lookup.getByText("练习；实践", { exact: true })).toBeVisible();
+  providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(providerRequests.items.map((item: { task: string }) => item.task)).toEqual([
+    "enrich",
+    "translate",
+  ]);
+
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: practice" });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  chineseToggle = lookup.getByRole("checkbox", { name: "显示中文释义" });
+  await expect(chineseToggle).not.toBeChecked();
+  await expect(lookup.getByText("练习；实践", { exact: true })).toHaveCount(0);
+  await chineseToggle.check();
+  await expect(lookup.getByText("练习；实践", { exact: true })).toBeVisible();
+
+  providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(providerRequests.items).toHaveLength(2);
+});
+
+test("invalid output, provider failure, and timeout preserve Dictionary-only output", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(
+    lookup.getByText("本地 AI 返回格式无效，已保留基础词典结果"),
+  ).toBeVisible();
+  await expect(
+    lookup.getByText("To communicate, usually by means of speech."),
+  ).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  await expect(
+    lookup.getByText("本地 AI 返回格式无效，已保留基础词典结果"),
+  ).toBeVisible();
+  let providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(
+    providerRequests.items.filter(
+      (item: { expression: string }) => item.expression === "talk",
+    ),
+  ).toHaveLength(2);
+
+  await lookup.getByRole("button", { name: "查询候选短语 talk about" }).click();
+  await expect(
+    lookup.getByText("本地 AI 暂时不可用，已保留基础词典结果"),
+  ).toBeVisible();
+  await expect(lookup.getByText("To discuss a particular subject.")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await selectTextWithinSentence(page, 1, "talking about practice");
+  lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking about practice",
+  });
+  await expect(
+    lookup.getByText("本地 AI 响应超时，已保留基础词典结果"),
+  ).toBeVisible();
+  await expect(
+    lookup.getByText(
+      "To discuss the repeated work used to improve a skill.",
+    ),
+  ).toBeVisible();
+});
+
+test("missing local AI configuration leaves Word Lookup usable", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3101/" });
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  const lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(
+    lookup.getByText("本地 AI 未配置，当前使用基础词典"),
+  ).toBeVisible();
+  await expect(
+    lookup.getByText("Repetition of an activity to improve a skill."),
+  ).toBeVisible();
+
+  const providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  expect(providerRequests.items).toHaveLength(0);
 });
 
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
