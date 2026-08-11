@@ -2,6 +2,7 @@ import { ImportEntry } from "./import-entry";
 import { PersistenceAlert } from "./persistence-alert";
 import { SettingsAndDiagnostics } from "./settings-and-diagnostics";
 import { StudyLibraryList } from "./study-library-list";
+import { WordBankList } from "./word-bank-list";
 
 function LibraryMark() {
   return (
@@ -48,6 +49,7 @@ export function StudyLibraryApp() {
       </section>
 
       <StudyLibraryList />
+      <WordBankList />
 
       <footer>
         <span>Local-first learning workspace</span>

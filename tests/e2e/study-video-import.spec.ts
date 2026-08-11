@@ -1118,7 +1118,7 @@ test("local AI selects a supplied dictionary sense without blurring source bound
 
   const persistedLookupData = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 3);
+      const openRequest = indexedDB.open("learn-my-english", 4);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
@@ -1255,7 +1255,7 @@ test("consented DeepSeek fallback is minimal, remembered, and follows Local AI",
   expect(browserAiResponse).not.toContain("e2e-deepseek-secret");
   const persistedBrowserData = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 3);
+      const openRequest = indexedDB.open("learn-my-english", 4);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
@@ -1514,6 +1514,113 @@ test("missing local AI configuration leaves Word Lookup usable", async ({
     .get("http://127.0.0.1:4176/requests")
     .then((response) => response.json());
   expect(providerRequests.items).toHaveLength(0);
+});
+
+test("Word Bank preserves contextual lookups, distinct videos, and exact sentence return", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4174/reset");
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("checkbox", { name: "显示中文释义" }).check();
+  await expect(lookup.getByText("练习；实践", { exact: true })).toBeVisible();
+
+  const saveButton = lookup.getByRole("button", { name: "保存到 Word Bank" });
+  await saveButton.click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+  await lookup.getByRole("button", { name: "取消保存" }).click();
+  await expect(saveButton).toBeVisible();
+  await saveButton.click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await page.route("**/api/dictionary**", (route) => route.abort());
+  await page.route("**/api/word-lookup/ai", (route) => route.abort());
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Word Bank" })).toBeVisible();
+  let bankEntries = page.getByRole("article", { name: /Word Bank: practice/ });
+  await expect(bankEntries).toHaveCount(1);
+  let firstEntry = bankEntries.filter({
+    hasText: "Today we're talking about practice.",
+  });
+  await expect(firstEntry).toContainText(
+    "Repetition of an activity to improve a skill.",
+  );
+  await expect(firstEntry).toContainText("Today we're talking about practice.");
+  await expect(firstEntry).toContainText("0:04–0:07");
+  await expect(
+    firstEntry.getByLabel("Word Bank 美式发音 practice"),
+  ).toHaveAttribute(
+    "src",
+    "https://api.dictionaryapi.dev/media/pronunciations/en/practice-us.mp3",
+  );
+  let bankChineseToggle = firstEntry.getByRole("checkbox", {
+    name: "显示 practice 的中文释义",
+  });
+  await expect(bankChineseToggle).not.toBeChecked();
+  await expect(firstEntry.getByText("练习；实践", { exact: true })).toHaveCount(0);
+  await bankChineseToggle.check();
+  await expect(firstEntry.getByText("练习；实践", { exact: true })).toBeVisible();
+
+  await page.reload();
+  bankEntries = page.getByRole("article", { name: /Word Bank: practice/ });
+  firstEntry = bankEntries.filter({
+    hasText: "Today we're talking about practice.",
+  });
+  await expect(firstEntry).toBeVisible();
+  await firstEntry.getByRole("link", { name: "回到原句并播放" }).click();
+  await expect(page.getByText("已从 Word Bank 返回并播放第 2 句")).toBeVisible();
+  await expect(page.getByRole("button", { name: "播放第 2 句" })).toHaveClass(
+    /active/,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual(
+      expect.arrayContaining([
+        { method: "seekTo", seconds: 4 },
+        { method: "playVideo" },
+      ]),
+    );
+
+  await page.unroute("**/api/dictionary**");
+  await page.unroute("**/api/word-lookup/ai");
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/autocaps001",
+  });
+  await page.getByRole("button", { name: "查询 Practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await page.goto("/");
+  bankEntries = page.getByRole("article", { name: /Word Bank: practice/i });
+  await expect(bankEntries).toHaveCount(2);
+  await expect(
+    bankEntries.filter({ hasText: "Today we're talking about practice." }),
+  ).toBeVisible();
+  const secondEntry = bankEntries.filter({
+    hasText: "Practice with automatic captions.",
+  });
+  await expect(secondEntry).toBeVisible();
+  await secondEntry
+    .getByRole("button", { name: "从 Word Bank 移除 practice" })
+    .click();
+  await expect(bankEntries).toHaveCount(1);
+  await page.reload();
+  await expect(
+    page.getByRole("article", { name: /Word Bank: practice/i }),
+  ).toHaveCount(1);
 });
 
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({

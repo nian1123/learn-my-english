@@ -32,7 +32,15 @@ import { LearningSentenceEditor } from "./learning-sentence-editor";
 import { WordLookupDrawer } from "./word-lookup-drawer";
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
 
-export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
+export function StudySession({
+  autoplayTarget = false,
+  studyVideoId,
+  targetSentenceId,
+}: {
+  autoplayTarget?: boolean;
+  studyVideoId: StudyVideoId;
+  targetSentenceId?: string;
+}) {
   const [studyVideo, setStudyVideo] = useState<StudyVideo | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -53,10 +61,14 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
   const [wordLookupRequest, setWordLookupRequest] =
     useState<WordLookupRequest | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [wordBankReturnMessage, setWordBankReturnMessage] = useState<string | null>(
+    null,
+  );
   const playerRef = useRef<YouTubePlayerHandle>(null);
   const activeSentenceRef = useRef<HTMLButtonElement>(null);
   const selectedSentenceIdRef = useRef<LearningSentenceId | null>(null);
   const positionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const restoredWordBankTargetRef = useRef(false);
   const keyboardActionsRef = useRef<{
     nextSentence: () => void;
     previousSentence: () => void;
@@ -144,6 +156,33 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     if (!activeSentenceId) return;
     activeSentenceRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeSentenceId]);
+
+  useEffect(() => {
+    if (
+      restoredWordBankTargetRef.current ||
+      !studyVideo ||
+      !targetSentenceId
+    ) {
+      return;
+    }
+    restoredWordBankTargetRef.current = true;
+    const sentenceIndex = learningSentences.findIndex(
+      (sentence) => sentence.id === targetSentenceId,
+    );
+    const sentence = learningSentences[sentenceIndex];
+    if (!sentence) {
+      setWordBankReturnMessage("Word Bank 的原句已被修订，无法精确定位");
+      return;
+    }
+    selectedSentenceIdRef.current = sentence.id;
+    setActiveSentenceId(sentence.id);
+    if (autoplayTarget) playerRef.current?.playFrom(sentence.startSeconds);
+    setWordBankReturnMessage(
+      autoplayTarget
+        ? `已从 Word Bank 返回并播放第 ${sentenceIndex + 1} 句`
+        : `已从 Word Bank 返回第 ${sentenceIndex + 1} 句`,
+    );
+  }, [autoplayTarget, learningSentences, studyVideo, targetSentenceId]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -321,6 +360,11 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     "learner-supplied": `学习者提供的 Caption Source · ${studyVideo.captionSource.format.toUpperCase()}`,
     manual: "Manual captions",
   }[studyVideo.captionSource.kind];
+  const wordLookupOriginSentence = wordLookupRequest
+    ? learningSentences.find(
+        (sentence) => sentence.id === wordLookupRequest.sentenceId,
+      )
+    : null;
 
   return (
     <main className="study-page" id="main-content">
@@ -343,6 +387,11 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             : "study-workspace"
         }
       >
+        {wordBankReturnMessage ? (
+          <p className="word-bank-return-status" role="status">
+            {wordBankReturnMessage}
+          </p>
+        ) : null}
         <section className="player-column" aria-label="YouTube 播放器">
           <YouTubePlayer
             className="study-player"
@@ -526,10 +575,20 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             ))}
           </ol>
         </section>
-        {wordLookupRequest ? (
+        {wordLookupRequest && wordLookupOriginSentence ? (
           <WordLookupDrawer
             key={`${wordLookupRequest.sentenceId}:${wordLookupRequest.candidates[0]?.surfaceForm}`}
             onClose={() => setWordLookupRequest(null)}
+            origin={{
+              studyVideoId: studyVideo.id,
+              studyVideoTitle: studyVideo.title,
+              studyVideoChannel: studyVideo.channel,
+              studyVideoThumbnailUrl: studyVideo.thumbnailUrl,
+              learningSentenceId: wordLookupOriginSentence.id,
+              sentenceText: wordLookupOriginSentence.text,
+              startSeconds: wordLookupOriginSentence.startSeconds,
+              endSeconds: wordLookupOriginSentence.endSeconds,
+            }}
             request={wordLookupRequest}
           />
         ) : null}

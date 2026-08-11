@@ -713,6 +713,244 @@ input:disabled {
   }
 }
 
+.word-bank-section {
+  padding: 68px 0 88px;
+  border-top: 1px solid var(--line);
+}
+
+.word-bank-loading,
+.word-bank-empty {
+  margin-top: 28px;
+  color: var(--muted);
+}
+
+.word-bank-empty {
+  padding: 34px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 16px;
+  background: rgba(17, 24, 42, 0.45);
+}
+
+.word-bank-empty h3,
+.word-bank-empty p {
+  margin: 0;
+}
+
+.word-bank-empty h3 {
+  color: var(--text);
+  font-size: 19px;
+}
+
+.word-bank-empty p {
+  margin-top: 7px;
+  font-size: 12px;
+}
+
+.word-bank-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
+  gap: 20px;
+  margin-top: 28px;
+}
+
+.word-bank-card {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background:
+    linear-gradient(145deg, rgba(232, 161, 43, 0.055), transparent 42%),
+    var(--surface);
+  box-shadow: 0 18px 48px rgba(1, 5, 15, 0.2);
+}
+
+.word-bank-card > header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.word-bank-card > header p,
+.word-bank-card > header h3 {
+  margin: 0;
+}
+
+.word-bank-card > header p {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.word-bank-card > header h3 {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.word-bank-card > header span {
+  color: var(--accent-bright);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.word-bank-card > header button {
+  padding: 7px 9px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 8px;
+}
+
+.word-bank-meaning,
+.word-bank-example,
+.word-bank-origin {
+  display: grid;
+  gap: 7px;
+}
+
+.word-bank-meaning > span,
+.word-bank-example > span,
+.word-bank-origin > span {
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.word-bank-meaning p,
+.word-bank-example p,
+.word-bank-origin p,
+.word-bank-origin blockquote {
+  margin: 0;
+}
+
+.word-bank-meaning p {
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.word-bank-example {
+  padding: 12px;
+  border-left: 2px solid rgba(118, 155, 255, 0.55);
+  background: rgba(118, 155, 255, 0.055);
+}
+
+.word-bank-example > span {
+  color: #9bb2ff;
+}
+
+.word-bank-example p {
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.word-bank-pronunciation {
+  display: grid;
+  gap: 6px;
+}
+
+.word-bank-pronunciation audio {
+  width: 100%;
+  height: 32px;
+}
+
+.word-bank-pronunciation a,
+.word-bank-pronunciation small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.word-bank-pronunciation button {
+  width: fit-content;
+  padding: 8px 10px;
+  color: var(--accent-bright);
+  border: 1px solid rgba(232, 161, 43, 0.28);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 9px;
+  font-weight: 730;
+}
+
+.word-bank-pronunciation button span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.word-bank-chinese-toggle {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(7, 13, 25, 0.58);
+}
+
+.word-bank-chinese-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.word-bank-chinese-toggle > span {
+  display: grid;
+  gap: 2px;
+}
+
+.word-bank-chinese-toggle strong {
+  color: var(--text-soft);
+  font-size: 9px;
+}
+
+.word-bank-chinese-toggle small,
+.word-bank-chinese-missing {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.word-bank-chinese,
+.word-bank-chinese-missing {
+  margin: -8px 0 0;
+  padding: 0 11px;
+}
+
+.word-bank-chinese {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.word-bank-origin {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.word-bank-origin blockquote {
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.word-bank-origin p,
+.word-bank-origin small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.word-bank-origin a {
+  width: fit-content;
+  color: var(--accent-bright);
+  font-size: 9px;
+  font-weight: 740;
+  text-decoration: none;
+}
+
 footer {
   display: flex;
   justify-content: space-between;
@@ -2180,6 +2418,67 @@ footer {
   color: var(--text);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.lookup-word-bank-save {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px;
+  border: 1px solid rgba(232, 161, 43, 0.24);
+  border-radius: 11px;
+  background: rgba(232, 161, 43, 0.06);
+}
+
+.lookup-word-bank-save > div {
+  display: grid;
+  gap: 3px;
+}
+
+.lookup-word-bank-save strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.lookup-word-bank-save small {
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.lookup-word-bank-save button {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  color: #160e02;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-bright);
+  font-size: 8px;
+  font-weight: 780;
+}
+
+.lookup-word-bank-save button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.lookup-word-bank-save > p {
+  width: 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 8px;
+}
+
+.word-bank-return-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 13px;
+  color: var(--success);
+  border: 1px solid rgba(116, 198, 157, 0.22);
+  border-radius: 10px;
+  background: rgba(116, 198, 157, 0.07);
+  font-size: 10px;
 }
 
 .study-loading {

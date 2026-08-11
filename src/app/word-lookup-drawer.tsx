@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   loadWordLookupAiEnrichment,
@@ -10,11 +10,23 @@ import {
 import { loadWordLookup, type LoadedWordLookup } from "@/client/word-lookup-client";
 import type { DeepSeekCloudConsent } from "@/client/learner-preferences";
 import {
+  readWordBankEntry,
+  removeWordBankEntry,
+  saveWordBankEntry,
+} from "@/client/word-bank";
+import {
   dictionarySenseOptions,
   type WordLookupAiEnrichment,
   type WordLookupAiMode,
+  type WordLookupAiResponse,
   type WordLookupAiUnavailableReason,
 } from "@/domain/word-lookup-ai";
+import {
+  createWordBankEntry,
+  wordBankEntryIdFor,
+  type WordBankEntry,
+  type WordBankOrigin,
+} from "@/domain/word-bank";
 import type {
   DictionaryAudio,
   DictionaryLookupResult,
@@ -26,8 +38,14 @@ import { useStudyLibraryClient } from "./study-library-client-context";
 
 type WordLookupDrawerProps = {
   onClose: () => void;
+  origin: WordBankOrigin;
   request: WordLookupRequest;
 };
+
+type AvailableTranslation = Extract<
+  WordLookupAiResponse,
+  { status: "available"; task: "translate" }
+>;
 
 type FoundDictionaryResult = Extract<
   DictionaryLookupResult,
@@ -153,6 +171,7 @@ function AiAssistance({
   mode,
   onAllowDeepSeek,
   onDeclineDeepSeek,
+  onTranslationAvailable,
   sentenceText,
 }: {
   candidate: WordLookupCandidate;
@@ -163,6 +182,7 @@ function AiAssistance({
   mode: WordLookupAiMode;
   onAllowDeepSeek: () => void;
   onDeclineDeepSeek: () => void;
+  onTranslationAvailable: (translation: AvailableTranslation) => void;
   sentenceText: string;
 }) {
   const [showChinese, setShowChinese] = useState(false);
@@ -186,20 +206,29 @@ function AiAssistance({
       selectedSense.id,
       consent === "granted",
       abortController.signal,
-    ).then((next) => {
-      if (!ignore) setTranslation(next);
-    }).catch(() => {
-      if (!ignore && !abortController.signal.aborted) {
-        setTranslation({
-          source: "provider",
-          response: {
-            status: "unavailable",
-            mode: "dictionary-only",
-            reason: "provider-failure",
-          },
-        });
-      }
-    });
+    )
+      .then((next) => {
+        if (ignore) return;
+        setTranslation(next);
+        if (
+          next.response.status === "available" &&
+          next.response.task === "translate"
+        ) {
+          onTranslationAvailable(next.response);
+        }
+      })
+      .catch(() => {
+        if (!ignore && !abortController.signal.aborted) {
+          setTranslation({
+            source: "provider",
+            response: {
+              status: "unavailable",
+              mode: "dictionary-only",
+              reason: "provider-failure",
+            },
+          });
+        }
+      });
     return () => {
       ignore = true;
       abortController.abort();
@@ -208,6 +237,7 @@ function AiAssistance({
     candidate,
     consent,
     dictionaryResult,
+    onTranslationAvailable,
     selectedSense?.id,
     sentenceText,
     showChinese,
@@ -295,6 +325,7 @@ function AiAssistance({
 
 export function WordLookupDrawer({
   onClose,
+  origin,
   request,
 }: WordLookupDrawerProps) {
   const {
@@ -312,12 +343,40 @@ export function WordLookupDrawer({
     value: LoadedWordLookupAi;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savedEntry, setSavedEntry] = useState<WordBankEntry | null>(null);
+  const [wordBankStatus, setWordBankStatus] = useState<
+    "idle" | "saving" | "saved" | "removing" | "error"
+  >("idle");
+  const [translationForSave, setTranslationForSave] = useState<{
+    key: string;
+    response: AvailableTranslation;
+  } | null>(null);
   const candidate = request.candidates[selectedIndex] ?? request.candidates[0];
   const lookupKey = candidate
     ? `${candidate.normalizedForm}\u0000${request.sentenceText}`
     : "missing";
   const dictionaryLoaded = loaded?.key === lookupKey ? loaded.value : null;
   const currentAiLoaded = aiLoaded?.key === lookupKey ? aiLoaded.value : null;
+  const wordBankEntryId = candidate
+    ? wordBankEntryIdFor(origin, candidate)
+    : "missing";
+
+  useEffect(() => {
+    let active = true;
+    setSavedEntry(null);
+    setWordBankStatus("idle");
+    if (!candidate) return;
+    readWordBankEntry(wordBankEntryId)
+      .then((entry) => {
+        if (active) setSavedEntry(entry);
+      })
+      .catch(() => {
+        if (active) setWordBankStatus("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [candidate, wordBankEntryId]);
 
   useEffect(() => {
     if (!candidate) return;
@@ -355,6 +414,9 @@ export function WordLookupDrawer({
     }
     const abortController = new AbortController();
     let ignore = false;
+    setAiLoaded((current) =>
+      current?.key === lookupKey ? null : current,
+    );
     loadWordLookupAiEnrichment(
       candidate,
       request.sentenceText,
@@ -411,6 +473,51 @@ export function WordLookupDrawer({
     unavailableAiReason === "deepseek-consent-required";
   const allowDeepSeek = () => void setDeepSeekCloudConsent("granted");
   const declineDeepSeek = () => void setDeepSeekCloudConsent("declined");
+  const rememberTranslation = useCallback(
+    (translation: AvailableTranslation) =>
+      setTranslationForSave({ key: lookupKey, response: translation }),
+    [lookupKey],
+  );
+  const draftWordBankEntry =
+    dictionaryLoaded?.result.status === "found" &&
+    currentAiLoaded &&
+    !(
+      needsDeepSeekConsent &&
+      preferences.deepSeekCloudConsent === "unknown"
+    )
+      ? createWordBankEntry({
+          candidate,
+          dictionary: dictionaryLoaded.result,
+          enrichment: availableAiResponse ?? undefined,
+          origin,
+          translation:
+            translationForSave?.key === lookupKey
+              ? translationForSave.response
+              : undefined,
+        })
+      : null;
+  const saveToWordBank = async () => {
+    if (!draftWordBankEntry) return;
+    setWordBankStatus("saving");
+    try {
+      await saveWordBankEntry(draftWordBankEntry);
+      setSavedEntry(draftWordBankEntry);
+      setWordBankStatus("saved");
+    } catch {
+      setWordBankStatus("error");
+    }
+  };
+  const cancelWordBankSave = async () => {
+    if (!savedEntry) return;
+    setWordBankStatus("removing");
+    try {
+      await removeWordBankEntry(savedEntry.id);
+      setSavedEntry(null);
+      setWordBankStatus("idle");
+    } catch {
+      setWordBankStatus("error");
+    }
+  };
 
   return (
     <aside
@@ -580,6 +687,7 @@ export function WordLookupDrawer({
               mode={availableAiResponse.mode}
               onAllowDeepSeek={allowDeepSeek}
               onDeclineDeepSeek={declineDeepSeek}
+              onTranslationAvailable={rememberTranslation}
               sentenceText={request.sentenceText}
             />
           ) : currentAiLoaded ? null : (
@@ -587,6 +695,33 @@ export function WordLookupDrawer({
               正在获取 Local AI 语境辅助…
             </p>
           )}
+
+          {draftWordBankEntry ? (
+            <section className="lookup-word-bank-save" aria-label="Word Bank 保存">
+              <div>
+                <strong>{savedEntry ? "已保存到 Word Bank" : "保存这次语境"}</strong>
+                <small>保留所选词义、原句、Study Video 与时间区间</small>
+              </div>
+              <button
+                disabled={wordBankStatus === "saving" || wordBankStatus === "removing"}
+                onClick={() =>
+                  void (savedEntry ? cancelWordBankSave() : saveToWordBank())
+                }
+                type="button"
+              >
+                {wordBankStatus === "saving" ? "正在保存…" : null}
+                {wordBankStatus === "removing" ? "正在取消…" : null}
+                {wordBankStatus !== "saving" && wordBankStatus !== "removing"
+                  ? savedEntry
+                    ? "取消保存"
+                    : "保存到 Word Bank"
+                  : null}
+              </button>
+              {wordBankStatus === "error" ? (
+                <p role="alert">本地数据不可用，Word Bank 未能更新</p>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       ) : null}
     </aside>

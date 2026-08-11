@@ -40,6 +40,8 @@ DEEPSEEK_MODEL=
 
 中文释义默认关闭，只有学习者打开开关后才会请求。AI 未配置、同意被拒绝、超时、失败或返回无效结构时，Word Lookup 会保留可用的基础词典内容。服务端诊断只返回连接状态；Local AI 和 DeepSeek 密钥都不会进入浏览器、本地备份或 AI 缓存。
 
+有用的最终 Word Lookup 可以保存到 Word Bank。条目会在浏览器中保留词形、所选语境词义、发音、原 Learning Sentence、Study Video 和精确时间区间；即使本地服务停止，已保存的英文内容仍可读取。中文仍默认隐藏。来源 Study Video 仍在学习库时，可从 Word Bank 回到原句并立即播放。
+
 ## 字幕获取边界
 
 Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。
