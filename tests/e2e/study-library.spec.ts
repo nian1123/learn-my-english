@@ -3,6 +3,62 @@ import { expect, test, type Page } from "@playwright/test";
 const diagnosticRow = (page: Page, label: string) =>
   page.locator(".diagnostic-row").filter({ hasText: label });
 
+function boxesOverlapVertically(
+  left: { y: number; height: number },
+  right: { y: number; height: number },
+) {
+  return left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+function boxesOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+) {
+  return (
+    left.x < right.x + right.width &&
+    right.x < left.x + left.width &&
+    boxesOverlapVertically(left, right)
+  );
+}
+
+test("library summary and import action belong to their section heading rows", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1_440, height: 1_000 });
+  await page.goto("/");
+
+  const libraryTitle = page.getByRole("heading", { name: "我的学习库" });
+  const overview = page.getByLabel("学习库概览");
+  const recentTitle = page.getByRole("heading", { name: "最近学习" });
+  const importButton = page.getByRole("button", { name: "导入视频" });
+  await expect(overview.locator("strong")).toHaveText(["0", "0", "0"]);
+
+  const libraryTitleBox = await libraryTitle.boundingBox();
+  const overviewBox = await overview.boundingBox();
+  const recentTitleBox = await recentTitle.boundingBox();
+  const importButtonBox = await importButton.boundingBox();
+  expect(libraryTitleBox).not.toBeNull();
+  expect(overviewBox).not.toBeNull();
+  expect(recentTitleBox).not.toBeNull();
+  expect(importButtonBox).not.toBeNull();
+  expect(boxesOverlapVertically(libraryTitleBox!, overviewBox!)).toBe(true);
+  expect(boxesOverlapVertically(recentTitleBox!, importButtonBox!)).toBe(true);
+  expect(overviewBox!.x).toBeGreaterThan(libraryTitleBox!.x);
+  expect(importButtonBox!.x).toBeGreaterThan(recentTitleBox!.x);
+
+  await page.setViewportSize({ width: 620, height: 900 });
+  await expect(libraryTitle).toBeVisible();
+  await expect(overview).toBeVisible();
+  await expect(recentTitle).toBeVisible();
+  await expect(importButton).toBeVisible();
+  const narrowTitleBox = await libraryTitle.boundingBox();
+  const narrowOverviewBox = await overview.boundingBox();
+  expect(boxesOverlap(narrowTitleBox!, narrowOverviewBox!)).toBe(false);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(620);
+});
+
 test("learner can open an empty Study Library and inspect readiness", async ({ page }) => {
   await page.goto("/");
 

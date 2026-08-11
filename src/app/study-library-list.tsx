@@ -9,6 +9,7 @@ import { readStudyLibrary } from "@/client/study-video-library";
 import type { StudyVideo } from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
 
+import { ImportEntry } from "./import-entry";
 import { StudyVideoDeletionDialog } from "./study-video-deletion-dialog";
 
 function EmptyLibraryIllustration() {
@@ -123,118 +124,138 @@ export function StudyLibraryList() {
       .length ?? 0;
 
   return (
-    <section className="library-section" aria-labelledby="library-title">
-      <div className="library-overview" aria-label="学习库概览">
-        <div>
-          <span>VIDEOS</span>
-          <strong>{studyVideos ? count : "—"}</strong>
-        </div>
-        <div>
-          <span>SENTENCES</span>
-          <strong>{studyVideos ? sentenceCount : "—"}</strong>
-        </div>
-        <div>
-          <span>IN PROGRESS</span>
-          <strong>{studyVideos ? startedCount : "—"}</strong>
-        </div>
-      </div>
-
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">YOUR ARCHIVE</p>
-          <h2 id="library-title">最近学习</h2>
-        </div>
-        <span className="count-label">{count} 个视频 · 最近学习优先</span>
-      </div>
-
-      {loadFailed ? (
-        <div className="library-load-error" role="alert">
-          无法读取本地学习库，请检查 Chrome 的网站数据权限。
-        </div>
-      ) : null}
-
-      {studyVideos?.length === 0 ? (
-        <div className="empty-state">
-          <EmptyLibraryIllustration />
-          <div>
-            <p className="empty-kicker">START WITH ONE INTERVIEW</p>
-            <h3>还没有学习视频</h3>
-            <p>
-              选择一段你真的想听懂的公开 YouTube
-              访谈。应用会先尝试获取已有英文字幕；如果失败，再上传 VTT 或 SRT
-              文件继续。
-            </p>
-            <ul>
-              <li>普通点播视频，时长不超过 3 小时</li>
-              <li>视频允许嵌入播放</li>
-              <li>无可用字幕时可上传英文 VTT/SRT</li>
-            </ul>
+    <>
+      <section className="hero" aria-labelledby="library-page-title">
+        <div className="hero-heading-row">
+          <div className="hero-copy">
+            <p className="eyebrow">STUDY LIBRARY · AMERICAN ENGLISH</p>
+            <h1 id="library-page-title">我的学习库</h1>
+          </div>
+          <div className="library-overview" aria-label="学习库概览">
+            <div>
+              <span>VIDEOS</span>
+              <strong>{studyVideos ? count : "—"}</strong>
+            </div>
+            <div>
+              <span>SENTENCES</span>
+              <strong>{studyVideos ? sentenceCount : "—"}</strong>
+            </div>
+            <div>
+              <span>IN PROGRESS</span>
+              <strong>{studyVideos ? startedCount : "—"}</strong>
+            </div>
           </div>
         </div>
-      ) : null}
+        <p className="hero-lede">
+          收藏值得反复听的真实访谈。每次回来，都从上次那一句继续。
+        </p>
+      </section>
 
-      {studyVideos === null && !loadFailed ? <LoadingLibrary /> : null}
-
-      {studyVideos && studyVideos.length > 0 ? (
-        <div className="study-video-grid">
-          {studyVideos.map((studyVideo) => (
-            <article className="study-video-card" key={studyVideo.id}>
-              <div className="study-video-cover">
-                <img
-                  alt={`${studyVideo.title} 缩略图`}
-                  src={studyVideo.thumbnailUrl}
-                />
-                <span className="language-badge">EN</span>
-                <span className="duration-badge">
-                  {formatMediaTime(studyVideo.durationSeconds)}
-                </span>
-              </div>
-              <div className="study-video-card-copy">
-                <p>{studyVideo.channel}</p>
-                <h3>{studyVideo.title}</h3>
-                <div className="study-video-meta">
-                  <span>{studyVideo.learningSentences.length} 个 Learning Sentences</span>
-                  <span>上次位置 {formatMediaTime(studyVideo.lastPositionSeconds)}</span>
-                </div>
-                <div className="progress-heading">
-                  <span>学习进度</span>
-                  <strong>{progressPercent(studyVideo)}%</strong>
-                </div>
-                <progress
-                  aria-label="学习进度"
-                  max="100"
-                  value={progressPercent(studyVideo)}
-                />
-                <div className="study-video-actions">
-                  <Link href={`/study/${encodeURIComponent(studyVideo.id)}`}>
-                    <span>继续学习</span>
-                    <span aria-hidden="true">↗</span>
-                  </Link>
-                  <button
-                    aria-label={`删除 Study Video：${studyVideo.title}`}
-                    onClick={() => openDeletion(studyVideo)}
-                    type="button"
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
+      <section className="library-section" aria-labelledby="library-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">YOUR ARCHIVE</p>
+            <h2 id="library-title">最近学习</h2>
+          </div>
+          <div className="library-heading-actions">
+            <span className="count-label">{count} 个视频 · 最近学习优先</span>
+            <ImportEntry />
+          </div>
         </div>
-      ) : null}
 
-      {deletionTarget ? (
-        <StudyVideoDeletionDialog
-          deleting={deletionStatus === "deleting"}
-          error={deletionStatus === "error"}
-          onCancel={cancelDeletion}
-          onConfirm={() => void confirmDeletion()}
-          onRemoveWordBankContextsChange={setRemoveWordBankContexts}
-          removeWordBankContexts={removeWordBankContexts}
-          studyVideo={deletionTarget}
-        />
-      ) : null}
-    </section>
+        {loadFailed ? (
+          <div className="library-load-error" role="alert">
+            无法读取本地学习库，请检查 Chrome 的网站数据权限。
+          </div>
+        ) : null}
+
+        {studyVideos?.length === 0 ? (
+          <div className="empty-state">
+            <EmptyLibraryIllustration />
+            <div>
+              <p className="empty-kicker">START WITH ONE INTERVIEW</p>
+              <h3>还没有学习视频</h3>
+              <p>
+                选择一段你真的想听懂的公开 YouTube
+                访谈。应用会先尝试获取已有英文字幕；如果失败，再上传 VTT 或 SRT
+                文件继续。
+              </p>
+              <ul>
+                <li>普通点播视频，时长不超过 3 小时</li>
+                <li>视频允许嵌入播放</li>
+                <li>无可用字幕时可上传英文 VTT/SRT</li>
+              </ul>
+            </div>
+          </div>
+        ) : null}
+
+        {studyVideos === null && !loadFailed ? <LoadingLibrary /> : null}
+
+        {studyVideos && studyVideos.length > 0 ? (
+          <div className="study-video-grid">
+            {studyVideos.map((studyVideo) => (
+              <article className="study-video-card" key={studyVideo.id}>
+                <div className="study-video-cover">
+                  <img
+                    alt={`${studyVideo.title} 缩略图`}
+                    src={studyVideo.thumbnailUrl}
+                  />
+                  <span className="language-badge">EN</span>
+                  <span className="duration-badge">
+                    {formatMediaTime(studyVideo.durationSeconds)}
+                  </span>
+                </div>
+                <div className="study-video-card-copy">
+                  <p>{studyVideo.channel}</p>
+                  <h3>{studyVideo.title}</h3>
+                  <div className="study-video-meta">
+                    <span>
+                      {studyVideo.learningSentences.length} 个 Learning Sentences
+                    </span>
+                    <span>
+                      上次位置 {formatMediaTime(studyVideo.lastPositionSeconds)}
+                    </span>
+                  </div>
+                  <div className="progress-heading">
+                    <span>学习进度</span>
+                    <strong>{progressPercent(studyVideo)}%</strong>
+                  </div>
+                  <progress
+                    aria-label="学习进度"
+                    max="100"
+                    value={progressPercent(studyVideo)}
+                  />
+                  <div className="study-video-actions">
+                    <Link href={`/study/${encodeURIComponent(studyVideo.id)}`}>
+                      <span>继续学习</span>
+                      <span aria-hidden="true">↗</span>
+                    </Link>
+                    <button
+                      aria-label={`删除 Study Video：${studyVideo.title}`}
+                      onClick={() => openDeletion(studyVideo)}
+                      type="button"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {deletionTarget ? (
+          <StudyVideoDeletionDialog
+            deleting={deletionStatus === "deleting"}
+            error={deletionStatus === "error"}
+            onCancel={cancelDeletion}
+            onConfirm={() => void confirmDeletion()}
+            onRemoveWordBankContextsChange={setRemoveWordBankContexts}
+            removeWordBankContexts={removeWordBankContexts}
+            studyVideo={deletionTarget}
+          />
+        ) : null}
+      </section>
+    </>
   );
 }

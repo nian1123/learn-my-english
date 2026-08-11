@@ -1,4 +1,3 @@
-import { ImportEntry } from "./import-entry";
 import { PersistenceAlert } from "./persistence-alert";
 import { SettingsAndDiagnostics } from "./settings-and-diagnostics";
 import { StudyLibraryList } from "./study-library-list";
@@ -35,18 +34,6 @@ export function StudyLibraryApp() {
       </header>
 
       <PersistenceAlert />
-
-      <section className="hero" aria-labelledby="library-page-title">
-        <div className="hero-copy">
-          <p className="eyebrow">STUDY LIBRARY · AMERICAN ENGLISH</p>
-          <h1 id="library-page-title">我的学习库</h1>
-          <p className="hero-lede">
-            收藏值得反复听的真实访谈。每次回来，都从上次那一句继续。
-          </p>
-        </div>
-
-        <ImportEntry />
-      </section>
 
       <StudyLibraryList />
       <WordBankList />
