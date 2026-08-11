@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import type { YouTubePlayerInstance } from "@/client/youtube-iframe-api";
 import { saveStudyVideo } from "@/client/study-video-library";
 import {
   CaptionSourceParseError,
@@ -28,6 +27,7 @@ import {
 } from "@/domain/youtube-url";
 
 import { useStudyLibraryClient } from "./study-library-client-context";
+import type { PlayerReadiness } from "./youtube-player";
 
 const MAXIMUM_DURATION_SECONDS = 3 * 60 * 60;
 const SUPPORTED_CAPTION_CONTENT_TYPES = new Set([
@@ -74,7 +74,7 @@ type CaptionAcquisition = {
   kind: "auto-generated" | "manual";
 };
 
-async function waitForDuration(player: YouTubePlayerInstance): Promise<number> {
+async function waitForDuration(player: PlayerReadiness): Promise<number> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const duration = player.getDuration();
     if (duration > 0) return duration;
@@ -283,7 +283,7 @@ export function useStudyVideoImport() {
   };
 
   const finishImport = async (
-    player: YouTubePlayerInstance,
+    player: PlayerReadiness,
     candidate: PendingStudyVideoImport,
   ) => {
     if (!importActiveRef.current) return;

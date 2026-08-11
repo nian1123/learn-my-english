@@ -40,7 +40,11 @@ ${Array.from({ length: 30 }, (_, index) => {
 
 async function installYouTubePlayerBoundary(
   page: Page,
-  options: { duration: number; errorCode?: number },
+  options: {
+    duration: number;
+    errorCode?: number;
+    playbackRates?: number[];
+  },
 ) {
   await page.route("https://www.youtube.com/iframe_api", async (route) => {
     await route.fulfill({
@@ -52,6 +56,7 @@ async function installYouTubePlayerBoundary(
   await page.addInitScript((fixture) => {
     type PlayerEvents = {
       onError?: (event: { data: number }) => void;
+      onPlaybackRateChange?: (event: { data: number }) => void;
       onReady?: (event: { target: FakeYouTubePlayer }) => void;
     };
 
@@ -86,6 +91,10 @@ async function installYouTubePlayerBoundary(
         return fixture.duration;
       }
 
+      getAvailablePlaybackRates() {
+        return fixture.playbackRates ?? [0.75, 1];
+      }
+
       pauseVideo() {
         recordCall("pauseVideo");
       }
@@ -97,6 +106,11 @@ async function installYouTubePlayerBoundary(
       seekTo(seconds: number) {
         this.currentTime = seconds;
         recordCall("seekTo", seconds);
+      }
+
+      setPlaybackRate(rate: number) {
+        recordCall("setPlaybackRate", rate);
+        this.playerOptions.events?.onPlaybackRateChange?.({ data: rate });
       }
 
       setCurrentTime(seconds: number) {
@@ -361,7 +375,6 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
     .toEqual([
       { method: "seekTo", seconds: 4 },
       { method: "playVideo" },
-      { method: "pauseVideo" },
     ]);
 
   await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(11));
@@ -385,6 +398,225 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
     "value",
     "15",
   );
+});
+
+test("normal playback and sentence controls move naturally through the transcript", async ({
+  page,
+}) => {
+  const threeSentenceCaptionSource = `WEBVTT
+
+00:00:01.000 --> 00:00:03.500
+Welcome to the show.
+
+00:00:04.000 --> 00:00:07.000
+Today we're talking about practice.
+
+00:00:07.500 --> 00:00:10.000
+Let's begin with listening.
+`;
+
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    contents: threeSentenceCaptionSource,
+    fileName: "three-sentences.vtt",
+  });
+
+  const secondSentence = page.getByRole("button", { name: "播放第 2 句" });
+  const thirdSentence = page.getByRole("button", { name: "播放第 3 句" });
+  await secondSentence.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+    ]);
+
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(7.6));
+  await expect(thirdSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+    ]);
+
+  await page.getByRole("button", { name: /上一句/ }).click();
+  await expect(secondSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await page.getByRole("button", { name: /下一句/ }).click();
+  await expect(thirdSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+      { method: "seekTo", seconds: 7.5 },
+      { method: "playVideo" },
+    ]);
+});
+
+test("repeat mode leaves an exact speaking gap and can resume natural playback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  const secondSentence = page.getByRole("button", { name: "播放第 2 句" });
+  const repeatButton = page.getByRole("button", { name: /单句循环/ });
+  await secondSentence.click();
+  await repeatButton.click();
+  await expect(repeatButton).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(7));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([{ method: "pauseVideo" }]);
+  await expect(page.getByText("3 秒跟读空档")).toBeVisible();
+  await expect(secondSentence).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+
+  await page.waitForTimeout(2_700);
+  await expect(
+    page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+  ).resolves.toEqual([{ method: "pauseVideo" }]);
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "pauseVideo" },
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+    ]);
+
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(7));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls").length),
+    )
+    .toBe(4);
+  await repeatButton.click();
+  await expect(repeatButton).toHaveAttribute("aria-pressed", "false");
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "pauseVideo" },
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+      { method: "playVideo" },
+    ]);
+  await page.waitForTimeout(500);
+  await expect(page.getByText("3 秒跟读空档")).toHaveCount(0);
+});
+
+test("transcript visibility and playback speed respect learner and video capabilities", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, {
+    duration: 74,
+    playbackRates: [0.75, 1, 1.25],
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await page.getByRole("checkbox", { name: "默认隐藏字幕" }).check();
+  await expect(page.getByText("偏好已保存")).toBeVisible();
+  await page.getByRole("button", { name: "关闭设置与诊断" }).click();
+  await submitStudyVideoImport(page);
+  await expect(
+    page.getByRole("heading", { name: "The Daily American Interview" }),
+  ).toBeVisible();
+
+  const firstSentenceText = page.locator(".learning-sentence strong").first();
+  await expect(firstSentenceText).toBeHidden();
+  await expect(page.getByRole("button", { name: "0.75x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1.25x" })).toHaveCount(0);
+  await expect(
+    page.getByText(/YouTube 原生字幕默认关闭.*播放器内 CC/),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /显示原文/ }).click();
+  await expect(firstSentenceText).toBeVisible();
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("button", { name: "0.75x" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([{ method: "setPlaybackRate", seconds: 0.75 }]);
+  await expect(page.getByRole("button", { name: "0.75x" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("Chinese shortcut guide matches the available listening controls", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await expect(page.getByText(/快捷键.*Alt.*R.*T/)).toBeVisible();
+  await page.getByRole("button", { name: "播放第 2 句" }).click();
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByRole("button", { name: "播放第 1 句" })).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(page.getByRole("button", { name: "播放第 2 句" })).toHaveAttribute(
+    "class",
+    "learning-sentence active",
+  );
+  await page.keyboard.press("r");
+  await expect(page.getByRole("button", { name: /单句循环/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.keyboard.press("t");
+  await expect(page.locator(".learning-sentence strong").first()).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+    ]);
 });
 
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
@@ -542,7 +774,6 @@ We visited North St. Paul.
     .toEqual([
       { method: "seekTo", seconds: 12 },
       { method: "playVideo" },
-      { method: "pauseVideo" },
     ]);
   await page.evaluate(() =>
     Reflect.get(window, "__youtubePlayerCalls").splice(0),
@@ -617,7 +848,6 @@ a better listening tool.
     .toEqual([
       { method: "seekTo", seconds: 1 },
       { method: "playVideo" },
-      { method: "pauseVideo" },
     ]);
 });
 

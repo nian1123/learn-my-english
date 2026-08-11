@@ -153,7 +153,7 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
           <div>
             <p className="eyebrow">LEARNING PREFERENCE</p>
             <h3 id="preference-title">听力偏好</h3>
-            <p>这项设置会在逐句学习功能开放后自动应用。</p>
+            <p>打开 Study Video 时自动应用，学习页仍可临时切换。</p>
           </div>
           <label className="toggle-row">
             <span>
