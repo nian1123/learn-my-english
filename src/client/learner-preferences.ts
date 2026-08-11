@@ -10,19 +10,32 @@ const LEARNER_PREFERENCE_KEY = "learner-preferences";
 
 export type LearnerPreferences = {
   hideTranscriptByDefault: boolean;
+  deepSeekCloudConsent: DeepSeekCloudConsent;
 };
+
+export type DeepSeekCloudConsent = "unknown" | "granted" | "declined";
 
 export const DEFAULT_LEARNER_PREFERENCES: LearnerPreferences = {
   hideTranscriptByDefault: false,
+  deepSeekCloudConsent: "unknown",
 };
 
-function validPreferences(value: unknown): value is LearnerPreferences {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "hideTranscriptByDefault" in value &&
-    typeof value.hideTranscriptByDefault === "boolean"
-  );
+function normalizePreferences(value: unknown): LearnerPreferences {
+  if (typeof value !== "object" || value === null) {
+    return DEFAULT_LEARNER_PREFERENCES;
+  }
+  const candidate = value as Record<string, unknown>;
+  const deepSeekCloudConsent = candidate.deepSeekCloudConsent;
+  return {
+    hideTranscriptByDefault:
+      typeof candidate.hideTranscriptByDefault === "boolean"
+        ? candidate.hideTranscriptByDefault
+        : DEFAULT_LEARNER_PREFERENCES.hideTranscriptByDefault,
+    deepSeekCloudConsent:
+      deepSeekCloudConsent === "granted" || deepSeekCloudConsent === "declined"
+        ? deepSeekCloudConsent
+        : "unknown",
+  };
 }
 
 export async function readLearnerPreferences(): Promise<LearnerPreferences> {
@@ -39,9 +52,7 @@ export async function readLearnerPreferences(): Promise<LearnerPreferences> {
         .get(LEARNER_PREFERENCE_KEY),
     );
 
-    return validPreferences(stored)
-      ? stored
-      : DEFAULT_LEARNER_PREFERENCES;
+    return normalizePreferences(stored);
   } finally {
     database.close();
   }

@@ -30,6 +30,7 @@ function unavailable(
 
 async function requestWordLookupAi(
   payload: ReturnType<typeof createWordLookupAiRequest>,
+  allowDeepSeekFallback: boolean,
   signal: AbortSignal,
 ): Promise<WordLookupAiResponse> {
   let response: Response;
@@ -38,7 +39,7 @@ async function requestWordLookupAi(
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ lookup: payload, allowDeepSeekFallback }),
       signal,
     });
   } catch (error) {
@@ -63,6 +64,7 @@ export async function loadWordLookupAiEnrichment(
   candidate: WordLookupCandidate,
   sentenceText: string,
   dictionaryResult: Extract<DictionaryLookupResult, { status: "found" }>,
+  allowDeepSeekFallback: boolean,
   signal: AbortSignal,
 ): Promise<LoadedWordLookupAi> {
   const payload = createWordLookupAiRequest(
@@ -77,13 +79,18 @@ export async function loadWordLookupAiEnrichment(
     sentenceText,
   ).catch(() => null);
   if (
-    cached?.task === "enrich" &&
+    cached?.mode === "local-ai" &&
+    cached.task === "enrich" &&
     parseWordLookupAiEnrichment(cached.result, payload.senses)
   ) {
     return { response: cached, source: "cache" };
   }
 
-  const response = await requestWordLookupAi(payload, signal);
+  const response = await requestWordLookupAi(
+    payload,
+    allowDeepSeekFallback,
+    signal,
+  );
   if (response.status !== "available") {
     return { response, source: "provider" };
   }
@@ -93,12 +100,14 @@ export async function loadWordLookupAiEnrichment(
   ) {
     return unavailable("invalid-output");
   }
-  await saveWordLookupAiCache(
-    "enrich",
-    candidate,
-    sentenceText,
-    response,
-  ).catch(() => undefined);
+  if (response.mode === "local-ai") {
+    await saveWordLookupAiCache(
+      "enrich",
+      candidate,
+      sentenceText,
+      response,
+    ).catch(() => undefined);
+  }
   return { response, source: "provider" };
 }
 
@@ -107,6 +116,7 @@ export async function loadWordLookupAiTranslation(
   sentenceText: string,
   dictionaryResult: Extract<DictionaryLookupResult, { status: "found" }>,
   selectedSenseId: string,
+  allowDeepSeekFallback: boolean,
   signal: AbortSignal,
 ): Promise<LoadedWordLookupAi> {
   const payload = createWordLookupAiRequest(
@@ -122,21 +132,27 @@ export async function loadWordLookupAiTranslation(
     sentenceText,
     selectedSenseId,
   ).catch(() => null);
-  if (cached?.task === "translate") {
+  if (cached?.mode === "local-ai" && cached.task === "translate") {
     return { response: cached, source: "cache" };
   }
 
-  const response = await requestWordLookupAi(payload, signal);
+  const response = await requestWordLookupAi(
+    payload,
+    allowDeepSeekFallback,
+    signal,
+  );
   if (response.status !== "available") {
     return { response, source: "provider" };
   }
   if (response.task !== "translate") return unavailable("invalid-output");
-  await saveWordLookupAiCache(
-    "translate",
-    candidate,
-    sentenceText,
-    response,
-    selectedSenseId,
-  ).catch(() => undefined);
+  if (response.mode === "local-ai") {
+    await saveWordLookupAiCache(
+      "translate",
+      candidate,
+      sentenceText,
+      response,
+      selectedSenseId,
+    ).catch(() => undefined);
+  }
   return { response, source: "provider" };
 }

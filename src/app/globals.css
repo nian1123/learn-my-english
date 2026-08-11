@@ -2012,6 +2012,75 @@ footer {
   box-shadow: inset 2px 0 rgba(118, 155, 255, 0.55);
 }
 
+.lookup-ai-panel-deepseek {
+  border-color: rgba(99, 210, 180, 0.24);
+  background:
+    linear-gradient(145deg, rgba(99, 210, 180, 0.08), transparent 48%),
+    rgba(7, 13, 25, 0.66);
+  box-shadow: inset 2px 0 rgba(99, 210, 180, 0.52);
+}
+
+.lookup-ai-panel-deepseek > header span {
+  color: #8fe1c8;
+}
+
+.lookup-cloud-consent {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(99, 210, 180, 0.24);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(99, 210, 180, 0.08), transparent 55%),
+    rgba(7, 13, 25, 0.74);
+}
+
+.lookup-cloud-consent h3,
+.lookup-cloud-consent p,
+.lookup-cloud-consent ul {
+  margin: 0;
+}
+
+.lookup-cloud-consent h3 {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.lookup-cloud-consent p,
+.lookup-cloud-consent li {
+  color: var(--muted-strong);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.lookup-cloud-consent ul {
+  display: grid;
+  gap: 3px;
+  padding-left: 18px;
+}
+
+.lookup-cloud-consent-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.lookup-cloud-consent-actions button {
+  padding: 8px 10px;
+  color: #06130f;
+  border: 1px solid #8fe1c8;
+  border-radius: 8px;
+  background: #8fe1c8;
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.lookup-cloud-consent-actions button:last-child {
+  color: var(--muted-strong);
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
 .lookup-ai-panel > header {
   display: flex;
   gap: 10px;
@@ -2276,6 +2345,35 @@ footer {
   margin-top: 7px;
   color: var(--muted);
   font-size: 10px;
+}
+
+.cloud-consent-settings {
+  display: grid;
+  gap: 15px;
+  background: linear-gradient(
+    145deg,
+    rgba(99, 210, 180, 0.08),
+    rgba(99, 210, 180, 0.025)
+  );
+}
+
+.cloud-consent-settings small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.cloud-consent-settings .secondary-button {
+  width: fit-content;
+  padding: 9px 11px;
+  color: var(--text-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  font-size: 9px;
+  font-weight: 720;
 }
 
 .toggle-row {

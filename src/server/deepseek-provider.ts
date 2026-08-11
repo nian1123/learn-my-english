@@ -8,37 +8,34 @@ import type {
 
 import {
   requestOpenAiCompatibleWordLookup,
-  WordLookupProviderError,
   type WordLookupProviderConfiguration,
 } from "./openai-compatible-word-lookup";
 
-const DEFAULT_PROVIDER_TIMEOUT_MS = 5_000;
+const DEFAULT_DEEPSEEK_TIMEOUT_MS = 5_000;
 
-export { WordLookupProviderError as LocalAiProviderError };
-
-export function readLocalAiConfiguration(): WordLookupProviderConfiguration | null {
-  const baseUrl = process.env.OPENAI_BASE_URL?.trim();
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const model = process.env.OPENAI_MODEL?.trim();
+export function readDeepSeekConfiguration(): WordLookupProviderConfiguration | null {
+  const baseUrl = process.env.DEEPSEEK_BASE_URL?.trim();
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const model = process.env.DEEPSEEK_MODEL?.trim();
   if (!baseUrl || !apiKey || !model) return null;
   return { baseUrl, apiKey, model };
 }
 
 function providerTimeoutMs() {
-  const configured = Number(process.env.OPENAI_TIMEOUT_MS);
+  const configured = Number(process.env.DEEPSEEK_TIMEOUT_MS);
   return Number.isInteger(configured) && configured >= 100 && configured <= 30_000
     ? configured
-    : DEFAULT_PROVIDER_TIMEOUT_MS;
+    : DEFAULT_DEEPSEEK_TIMEOUT_MS;
 }
 
-export function requestLocalAiWordLookup(
+export function requestDeepSeekWordLookup(
   configuration: WordLookupProviderConfiguration,
   request: WordLookupAiRequest,
   callerSignal?: AbortSignal,
 ): Promise<WordLookupAiEnrichment | WordLookupAiTranslation> {
   return requestOpenAiCompatibleWordLookup(configuration, request, {
     callerSignal,
-    responseFormat: "json-schema",
+    responseFormat: "json-object",
     timeoutMs: providerTimeoutMs(),
   });
 }

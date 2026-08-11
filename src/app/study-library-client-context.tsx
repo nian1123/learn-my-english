@@ -12,6 +12,7 @@ import {
   DEFAULT_LEARNER_PREFERENCES,
   readLearnerPreferences,
   writeLearnerPreferences,
+  type DeepSeekCloudConsent,
   type LearnerPreferences,
 } from "@/client/learner-preferences";
 
@@ -23,6 +24,7 @@ type StudyLibraryClientState = {
   preferences: LearnerPreferences;
   preferenceStatus: PreferenceStatus;
   setHideTranscriptByDefault: (checked: boolean) => Promise<void>;
+  setDeepSeekCloudConsent: (consent: DeepSeekCloudConsent) => Promise<void>;
 };
 
 const StudyLibraryClientContext = createContext<StudyLibraryClientState | null>(
@@ -75,12 +77,7 @@ export function StudyLibraryClientProvider({
     };
   }, []);
 
-  const setHideTranscriptByDefault = async (checked: boolean) => {
-    const nextPreferences = {
-      ...preferences,
-      hideTranscriptByDefault: checked,
-    };
-
+  const savePreferences = async (nextPreferences: LearnerPreferences) => {
     setPreferences(nextPreferences);
     setPreferenceStatus("saving");
 
@@ -94,12 +91,19 @@ export function StudyLibraryClientProvider({
     }
   };
 
+  const setHideTranscriptByDefault = (checked: boolean) =>
+    savePreferences({ ...preferences, hideTranscriptByDefault: checked });
+
+  const setDeepSeekCloudConsent = (consent: DeepSeekCloudConsent) =>
+    savePreferences({ ...preferences, deepSeekCloudConsent: consent });
+
   return (
     <StudyLibraryClientContext.Provider
       value={{
         persistenceStatus,
         preferences,
         preferenceStatus,
+        setDeepSeekCloudConsent,
         setHideTranscriptByDefault,
       }}
     >

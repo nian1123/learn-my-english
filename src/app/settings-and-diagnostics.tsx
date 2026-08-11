@@ -57,6 +57,7 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
     persistenceStatus,
     preferences,
     preferenceStatus,
+    setDeepSeekCloudConsent,
     setHideTranscriptByDefault,
   } = useStudyLibraryClient();
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostic[]>([]);
@@ -180,6 +181,46 @@ function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
               ? "本地数据不可用，无法保存偏好"
               : null}
           </p>
+        </section>
+
+        <section
+          className="preference-card cloud-consent-settings"
+          aria-labelledby="deepseek-consent-title"
+        >
+          <div>
+            <p className="eyebrow">CLOUD PRIVACY</p>
+            <h3 id="deepseek-consent-title">DeepSeek 云端回退</h3>
+            <p>
+              {preferences.deepSeekCloudConsent === "granted"
+                ? "已允许 DeepSeek 云端回退"
+                : null}
+              {preferences.deepSeekCloudConsent === "declined"
+                ? "已拒绝 DeepSeek 云端回退"
+                : null}
+              {preferences.deepSeekCloudConsent === "unknown"
+                ? "尚未决定是否使用 DeepSeek 云端回退"
+                : null}
+            </p>
+            <small>
+              只有 Local AI 不可用时才会回退；许可不包含密钥，也不会同步到云端。
+            </small>
+          </div>
+          {preferences.deepSeekCloudConsent !== "unknown" ? (
+            <button
+              className="secondary-button"
+              disabled={
+                preferenceStatus === "loading" ||
+                preferenceStatus === "saving" ||
+                preferenceStatus === "error"
+              }
+              onClick={() => void setDeepSeekCloudConsent("unknown")}
+              type="button"
+            >
+              {preferences.deepSeekCloudConsent === "granted"
+                ? "撤销 DeepSeek 云端许可"
+                : "重置 DeepSeek 同意选择"}
+            </button>
+          ) : null}
         </section>
 
         <div className="panel-note">

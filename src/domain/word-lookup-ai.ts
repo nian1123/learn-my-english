@@ -34,18 +34,29 @@ export type WordLookupAiUnavailableReason =
   | "not-configured"
   | "timeout"
   | "invalid-output"
-  | "provider-failure";
+  | "provider-failure"
+  | "deepseek-consent-required"
+  | "deepseek-timeout"
+  | "deepseek-invalid-output"
+  | "deepseek-provider-failure";
+
+export type WordLookupAiMode = "local-ai" | "deepseek";
+
+export type WordLookupAiApiRequest = {
+  lookup: WordLookupAiRequest;
+  allowDeepSeekFallback: boolean;
+};
 
 export type WordLookupAiResponse =
   | {
       status: "available";
-      mode: "local-ai";
+      mode: WordLookupAiMode;
       task: "enrich";
       result: WordLookupAiEnrichment;
     }
   | {
       status: "available";
-      mode: "local-ai";
+      mode: WordLookupAiMode;
       task: "translate";
       result: WordLookupAiTranslation;
     }
@@ -184,6 +195,23 @@ export function parseWordLookupAiRequest(
   };
 }
 
+export function parseWordLookupAiApiRequest(
+  value: unknown,
+): WordLookupAiApiRequest | null {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !hasOnlyKeys(candidate, ["lookup", "allowDeepSeekFallback"]) ||
+    typeof candidate.allowDeepSeekFallback !== "boolean"
+  ) {
+    return null;
+  }
+  const lookup = parseWordLookupAiRequest(candidate.lookup);
+  return lookup
+    ? { lookup, allowDeepSeekFallback: candidate.allowDeepSeekFallback }
+    : null;
+}
+
 export function parseWordLookupAiEnrichment(
   value: unknown,
   senses: readonly WordLookupSense[],
@@ -232,10 +260,17 @@ export function isWordLookupAiResponse(
         "timeout",
         "invalid-output",
         "provider-failure",
+        "deepseek-consent-required",
+        "deepseek-timeout",
+        "deepseek-invalid-output",
+        "deepseek-provider-failure",
       ].includes(String(candidate.reason))
     );
   }
-  if (candidate.status !== "available" || candidate.mode !== "local-ai") {
+  if (
+    candidate.status !== "available" ||
+    (candidate.mode !== "local-ai" && candidate.mode !== "deepseek")
+  ) {
     return false;
   }
   if (!hasOnlyKeys(candidate, ["status", "mode", "task", "result"])) {

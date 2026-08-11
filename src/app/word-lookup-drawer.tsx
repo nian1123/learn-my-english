@@ -8,9 +8,11 @@ import {
   type LoadedWordLookupAi,
 } from "@/client/word-lookup-ai-client";
 import { loadWordLookup, type LoadedWordLookup } from "@/client/word-lookup-client";
+import type { DeepSeekCloudConsent } from "@/client/learner-preferences";
 import {
   dictionarySenseOptions,
   type WordLookupAiEnrichment,
+  type WordLookupAiMode,
   type WordLookupAiUnavailableReason,
 } from "@/domain/word-lookup-ai";
 import type {
@@ -19,6 +21,8 @@ import type {
   WordLookupCandidate,
   WordLookupRequest,
 } from "@/domain/word-lookup";
+
+import { useStudyLibraryClient } from "./study-library-client-context";
 
 type WordLookupDrawerProps = {
   onClose: () => void;
@@ -40,7 +44,47 @@ function aiUnavailableMessage(reason: WordLookupAiUnavailableReason) {
       return "本地 AI 返回格式无效，已保留基础词典结果";
     case "provider-failure":
       return "本地 AI 暂时不可用，已保留基础词典结果";
+    case "deepseek-consent-required":
+      return "需要明确同意后才能使用 DeepSeek 云端回退";
+    case "deepseek-timeout":
+      return "Local AI 不可用，DeepSeek 响应超时，已保留基础词典结果";
+    case "deepseek-invalid-output":
+      return "Local AI 不可用，DeepSeek 返回格式无效，已保留基础词典结果";
+    case "deepseek-provider-failure":
+      return "Local AI 不可用，DeepSeek 暂时不可用，已保留基础词典结果";
   }
+}
+
+function DeepSeekConsentPrompt({
+  onAllow,
+  onDecline,
+}: {
+  onAllow: () => void;
+  onDecline: () => void;
+}) {
+  return (
+    <section className="lookup-cloud-consent" aria-labelledby="cloud-consent-title">
+      <p className="eyebrow">CLOUD PRIVACY</p>
+      <h3 id="cloud-consent-title">允许使用 DeepSeek 云端回退？</h3>
+      <p>本地 AI 当前不可用。若继续，以下内容会离开设备并发送到 DeepSeek：</p>
+      <ul>
+        <li>所选单词或短语</li>
+        <li>当前 Learning Sentence</li>
+        <li>本次查询所需的基础词典候选义项</li>
+      </ul>
+      <p>
+        不会发送其他字幕、Study Library、学习记录或任何 API 密钥。选择会保存在当前浏览器，可随时在设置与诊断中撤销。
+      </p>
+      <div className="lookup-cloud-consent-actions">
+        <button onClick={onAllow} type="button">
+          同意并使用 DeepSeek
+        </button>
+        <button onClick={onDecline} type="button">
+          拒绝，仅使用基础词典
+        </button>
+      </div>
+    </section>
+  );
 }
 
 function BrowserPronunciation({ candidate }: { candidate: WordLookupCandidate }) {
@@ -100,17 +144,25 @@ function DictionaryPronunciation({
   );
 }
 
-function LocalAiAssistance({
+function AiAssistance({
   candidate,
+  consent,
   dictionaryResult,
   enrichment,
   enrichmentSource,
+  mode,
+  onAllowDeepSeek,
+  onDeclineDeepSeek,
   sentenceText,
 }: {
   candidate: WordLookupCandidate;
+  consent: DeepSeekCloudConsent;
   dictionaryResult: FoundDictionaryResult;
   enrichment: WordLookupAiEnrichment;
   enrichmentSource: LoadedWordLookupAi["source"];
+  mode: WordLookupAiMode;
+  onAllowDeepSeek: () => void;
+  onDeclineDeepSeek: () => void;
   sentenceText: string;
 }) {
   const [showChinese, setShowChinese] = useState(false);
@@ -132,6 +184,7 @@ function LocalAiAssistance({
       sentenceText,
       dictionaryResult,
       selectedSense.id,
+      consent === "granted",
       abortController.signal,
     ).then((next) => {
       if (!ignore) setTranslation(next);
@@ -153,6 +206,7 @@ function LocalAiAssistance({
     };
   }, [
     candidate,
+    consent,
     dictionaryResult,
     selectedSense?.id,
     sentenceText,
@@ -160,21 +214,28 @@ function LocalAiAssistance({
   ]);
 
   if (!selectedSense) return null;
-  const translated =
+  const translationResponse =
     translation?.response.status === "available" &&
     translation.response.task === "translate"
-      ? translation.response.result
+      ? translation.response
       : null;
+  const translated = translationResponse?.result ?? null;
   const translationUnavailable =
     translation?.response.status === "unavailable"
       ? translation.response.reason
       : null;
+  const translationNeedsConsent =
+    translationUnavailable === "deepseek-consent-required";
+  const providerLabel = mode === "local-ai" ? "LOCAL AI" : "DEEPSEEK";
 
   return (
-    <section aria-label="Local AI 辅助" className="lookup-ai-panel">
+    <section
+      aria-label={`${mode === "local-ai" ? "Local AI" : "DeepSeek"} 辅助`}
+      className={`lookup-ai-panel lookup-ai-panel-${mode}`}
+    >
       <header>
         <div>
-          <span>LOCAL AI · 辅助</span>
+          <span>{providerLabel} · 辅助</span>
           <strong>AI 生成例句，不是词典原文</strong>
         </div>
         {enrichmentSource === "cache" ? <small>AI 本地缓存</small> : null}
@@ -205,12 +266,25 @@ function LocalAiAssistance({
       ) : null}
       {translated ? (
         <div className="lookup-chinese-meaning">
-          <span>AI 中文释义</span>
+          <span>
+            {translationResponse?.mode === "deepseek"
+              ? "DeepSeek 中文释义"
+              : "Local AI 中文释义"}
+          </span>
           <p>{translated.chineseMeaning}</p>
           {translation?.source === "cache" ? <small>本地缓存</small> : null}
         </div>
       ) : null}
-      {translationUnavailable ? (
+      {translationNeedsConsent && consent === "unknown" ? (
+        <DeepSeekConsentPrompt
+          onAllow={onAllowDeepSeek}
+          onDecline={onDeclineDeepSeek}
+        />
+      ) : null}
+      {translationNeedsConsent && consent === "declined" ? (
+        <p className="lookup-ai-notice">已拒绝向 DeepSeek 发送内容</p>
+      ) : null}
+      {translationUnavailable && !translationNeedsConsent ? (
         <p className="lookup-ai-notice">
           中文释义暂时不可用：{aiUnavailableMessage(translationUnavailable)}
         </p>
@@ -223,6 +297,11 @@ export function WordLookupDrawer({
   onClose,
   request,
 }: WordLookupDrawerProps) {
+  const {
+    preferences,
+    preferenceStatus,
+    setDeepSeekCloudConsent,
+  } = useStudyLibraryClient();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loaded, setLoaded] = useState<{
     key: string;
@@ -267,13 +346,20 @@ export function WordLookupDrawer({
   }, [candidate, lookupKey, request.sentenceText]);
 
   useEffect(() => {
-    if (!candidate || dictionaryLoaded?.result.status !== "found") return;
+    if (
+      !candidate ||
+      dictionaryLoaded?.result.status !== "found" ||
+      preferenceStatus === "loading"
+    ) {
+      return;
+    }
     const abortController = new AbortController();
     let ignore = false;
     loadWordLookupAiEnrichment(
       candidate,
       request.sentenceText,
       dictionaryLoaded.result,
+      preferences.deepSeekCloudConsent === "granted",
       abortController.signal,
     ).then((next) => {
       if (!ignore) setAiLoaded({ key: lookupKey, value: next });
@@ -296,7 +382,14 @@ export function WordLookupDrawer({
       ignore = true;
       abortController.abort();
     };
-  }, [candidate, dictionaryLoaded, lookupKey, request.sentenceText]);
+  }, [
+    candidate,
+    dictionaryLoaded,
+    lookupKey,
+    preferences.deepSeekCloudConsent,
+    preferenceStatus,
+    request.sentenceText,
+  ]);
 
   if (!candidate) return null;
 
@@ -314,6 +407,10 @@ export function WordLookupDrawer({
     currentAiLoaded?.response.status === "unavailable"
       ? currentAiLoaded.response.reason
       : null;
+  const needsDeepSeekConsent =
+    unavailableAiReason === "deepseek-consent-required";
+  const allowDeepSeek = () => void setDeepSeekCloudConsent("granted");
+  const declineDeepSeek = () => void setDeepSeekCloudConsent("declined");
 
   return (
     <aside
@@ -331,7 +428,13 @@ export function WordLookupDrawer({
       </header>
 
       <div className="lookup-mode-row">
-        <span>{availableAiResponse ? "Local AI" : "Dictionary only"}</span>
+        <span>
+          {availableAiResponse
+            ? availableAiResponse.mode === "local-ai"
+              ? "Local AI"
+              : "DeepSeek"
+            : "Dictionary only"}
+        </span>
         <span>Dictionary facts</span>
         {dictionaryLoaded?.source === "cache" ? <span>本地缓存</span> : null}
       </div>
@@ -401,7 +504,22 @@ export function WordLookupDrawer({
             <BrowserPronunciation candidate={candidate} />
           )}
 
-          {unavailableAiReason ? (
+          {needsDeepSeekConsent &&
+          preferences.deepSeekCloudConsent === "unknown" ? (
+            <DeepSeekConsentPrompt
+              onAllow={allowDeepSeek}
+              onDecline={declineDeepSeek}
+            />
+          ) : null}
+
+          {needsDeepSeekConsent &&
+          preferences.deepSeekCloudConsent === "declined" ? (
+            <p className="lookup-ai-notice" role="status">
+              已拒绝向 DeepSeek 发送内容
+            </p>
+          ) : null}
+
+          {unavailableAiReason && !needsDeepSeekConsent ? (
             <p className="lookup-ai-notice" role="status">
               {aiUnavailableMessage(unavailableAiReason)}
             </p>
@@ -453,11 +571,15 @@ export function WordLookupDrawer({
           </section>
 
           {availableAiResponse ? (
-            <LocalAiAssistance
+            <AiAssistance
               candidate={candidate}
+              consent={preferences.deepSeekCloudConsent}
               dictionaryResult={dictionaryLoaded.result}
               enrichment={availableAiResponse.result}
               enrichmentSource={currentAiLoaded?.source ?? "provider"}
+              mode={availableAiResponse.mode}
+              onAllowDeepSeek={allowDeepSeek}
+              onDeclineDeepSeek={declineDeepSeek}
               sentenceText={request.sentenceText}
             />
           ) : currentAiLoaded ? null : (

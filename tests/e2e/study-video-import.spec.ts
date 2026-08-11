@@ -1036,6 +1036,7 @@ test("local AI selects a supplied dictionary sense without blurring source bound
 }) => {
   await request.post("http://127.0.0.1:4174/reset");
   await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
   let browserAiResponse = "";
   page.on("response", async (response) => {
     if (response.url().endsWith("/api/word-lookup/ai")) {
@@ -1133,6 +1134,252 @@ test("local AI selects a supplied dictionary sense without blurring source bound
     return JSON.stringify(values);
   });
   expect(persistedLookupData).not.toContain("e2e-local-secret");
+  const deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(deepSeekRequests.items).toHaveLength(0);
+});
+
+test("first DeepSeek fallback explains cloud data and remembers a refusal", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await expect(
+    lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
+  ).toBeVisible();
+  await expect(lookup.getByText("所选单词或短语", { exact: false })).toBeVisible();
+  await expect(lookup.getByText("当前 Learning Sentence", { exact: false })).toBeVisible();
+  await expect(lookup.getByText("基础词典候选义项", { exact: false })).toBeVisible();
+
+  let deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(deepSeekRequests.items).toHaveLength(0);
+
+  await lookup
+    .getByRole("button", { name: "拒绝，仅使用基础词典" })
+    .click();
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("已拒绝向 DeepSeek 发送内容")).toBeVisible();
+  await expect(
+    lookup.getByText("To communicate, usually by means of speech."),
+  ).toBeVisible();
+
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  await expect(
+    lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
+  ).toHaveCount(0);
+  await expect(lookup.getByText("已拒绝向 DeepSeek 发送内容")).toBeVisible();
+  deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(deepSeekRequests.items).toHaveLength(0);
+});
+
+test("consented DeepSeek fallback is minimal, remembered, and follows Local AI", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  let browserAiResponse = "";
+  page.on("response", async (response) => {
+    if (response.url().endsWith("/api/word-lookup/ai")) {
+      browserAiResponse += await response.text();
+    }
+  });
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
+  await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
+  await expect(
+    lookup.getByText(
+      "They talk every morning before the interview begins.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+
+  let localRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  let deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(
+    localRequests.items.filter(
+      (item: { expression: string }) => item.expression === "talk",
+    ),
+  ).toHaveLength(2);
+  expect(deepSeekRequests.items).toHaveLength(1);
+  const cloudRequest = deepSeekRequests.items[0];
+  expect(cloudRequest.authorization).toBe("Bearer e2e-deepseek-secret");
+  expect(cloudRequest.body.model).toBe("e2e-deepseek-model");
+  expect(cloudRequest.body.response_format).toEqual({ type: "json_object" });
+  expect(cloudRequest.body.messages).toHaveLength(2);
+  const untrustedPayload = JSON.parse(
+    cloudRequest.body.messages[1].content.replace(
+      "UNTRUSTED_LOOKUP_DATA=",
+      "",
+    ),
+  );
+  expect(untrustedPayload).toEqual({
+    task: "enrich",
+    expression: "talk",
+    sentence: "Today we're talking about practice.",
+    senses: [
+      {
+        definition: "To communicate, usually by means of speech.",
+        id: "0:0:0",
+        partOfSpeech: "verb",
+      },
+    ],
+  });
+  expect(JSON.stringify(cloudRequest.body)).not.toContain("Welcome to the show.");
+  expect(browserAiResponse).not.toContain("e2e-deepseek-secret");
+  const persistedBrowserData = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const openRequest = indexedDB.open("learn-my-english", 3);
+      openRequest.onsuccess = () => resolve(openRequest.result);
+      openRequest.onerror = () => reject(openRequest.error);
+    });
+    const storeNames = ["preferences", "word-lookups"];
+    const storedValues = await Promise.all(
+      storeNames.map(
+        (storeName) =>
+          new Promise<unknown[]>((resolve, reject) => {
+            const readRequest = database
+              .transaction(storeName, "readonly")
+              .objectStore(storeName)
+              .getAll();
+            readRequest.onsuccess = () => resolve(readRequest.result);
+            readRequest.onerror = () => reject(readRequest.error);
+          }),
+      ),
+    );
+    database.close();
+    return JSON.stringify(storedValues);
+  });
+  expect(persistedBrowserData).not.toContain("e2e-deepseek-secret");
+
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  await expect(
+    lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
+  ).toHaveCount(0);
+  await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
+  localRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(
+    localRequests.items.filter(
+      (item: { expression: string }) => item.expression === "talk",
+    ),
+  ).toHaveLength(3);
+  expect(deepSeekRequests.items).toHaveLength(2);
+});
+
+test("DeepSeek consent can be inspected and revoked from settings", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+  await page.waitForURL(/\/study\//);
+  const studyUrl = page.url();
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
+  await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await expect(page.getByText("已允许 DeepSeek 云端回退")).toBeVisible();
+  await page
+    .getByRole("button", { name: "撤销 DeepSeek 云端许可" })
+    .click();
+  await expect(page.getByText("尚未决定是否使用 DeepSeek 云端回退")).toBeVisible();
+
+  const beforeReopen = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  await page.goto(studyUrl);
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: talking" });
+  await expect(
+    lookup.getByRole("heading", { name: "允许使用 DeepSeek 云端回退？" }),
+  ).toBeVisible();
+  const afterReopen = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(afterReopen.items).toHaveLength(beforeReopen.items.length);
+});
+
+test("DeepSeek invalid output, provider failure, and timeout preserve dictionary facts", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 talking" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking",
+  });
+  await lookup.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
+  await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
+  await lookup.getByRole("checkbox", { name: "显示中文释义" }).check();
+  await expect(lookup.getByText("DeepSeek 返回格式无效")).toBeVisible();
+  await expect(
+    lookup
+      .getByRole("region", { name: "基础词典事实 talk" })
+      .getByText("To communicate, usually by means of speech."),
+  ).toBeVisible();
+
+  await lookup.getByRole("button", { name: "查询候选短语 talk about" }).click();
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("DeepSeek 暂时不可用")).toBeVisible();
+  await expect(lookup.getByText("To discuss a particular subject.")).toBeVisible();
+  await lookup.getByRole("button", { name: "关闭 Word Lookup" }).click();
+
+  await selectTextWithinSentence(page, 1, "talking about practice");
+  lookup = page.getByRole("complementary", {
+    name: "Word Lookup: talking about practice",
+  });
+  await expect(lookup.getByText("Dictionary only", { exact: true })).toBeVisible();
+  await expect(lookup.getByText("DeepSeek 响应超时")).toBeVisible();
+  await expect(
+    lookup.getByText(
+      "To discuss the repeated work used to improve a skill.",
+    ),
+  ).toBeVisible();
 });
 
 test("Chinese meaning is default-off, lazy, and cached separately", async ({
@@ -1141,7 +1388,7 @@ test("Chinese meaning is default-off, lazy, and cached separately", async ({
 }) => {
   await request.post("http://127.0.0.1:4176/reset");
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await submitStudyVideoImport(page);
+  await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3104/" });
 
   await page.getByRole("button", { name: "查询 practice" }).click();
   let lookup = page.getByRole("complementary", {
@@ -1193,7 +1440,7 @@ test("invalid output, provider failure, and timeout preserve Dictionary-only out
 }) => {
   await request.post("http://127.0.0.1:4176/reset");
   await installYouTubePlayerBoundary(page, { duration: 74 });
-  await submitStudyVideoImport(page);
+  await submitStudyVideoImport(page, { rootUrl: "http://127.0.0.1:3104/" });
 
   await page.getByRole("button", { name: "查询 talking" }).click();
   let lookup = page.getByRole("complementary", {

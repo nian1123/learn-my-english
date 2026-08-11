@@ -11,15 +11,23 @@ const configuredAiEnvironment = {
   OPENAI_API_KEY: "e2e-local-secret",
   OPENAI_MODEL: "e2e-local-model",
   OPENAI_TIMEOUT_MS: "300",
-  DEEPSEEK_BASE_URL: "https://api.deepseek.example",
+  DEEPSEEK_BASE_URL: "http://127.0.0.1:4177/v1",
   DEEPSEEK_API_KEY: "e2e-deepseek-secret",
   DEEPSEEK_MODEL: "e2e-deepseek-model",
+  DEEPSEEK_TIMEOUT_MS: "300",
 };
 
 const unconfiguredAiEnvironment = {
   OPENAI_BASE_URL: "",
   OPENAI_API_KEY: "",
   OPENAI_MODEL: "",
+  DEEPSEEK_BASE_URL: "",
+  DEEPSEEK_API_KEY: "",
+  DEEPSEEK_MODEL: "",
+};
+
+const localOnlyAiEnvironment = {
+  ...configuredAiEnvironment,
   DEEPSEEK_BASE_URL: "",
   DEEPSEEK_API_KEY: "",
   DEEPSEEK_MODEL: "",
@@ -80,6 +88,12 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 10_000,
     },
+    {
+      command: "node tests/fixtures/deepseek-provider.mjs",
+      url: "http://127.0.0.1:4177/health",
+      reuseExistingServer: false,
+      timeout: 10_000,
+    },
     applicationServer(3100, configuredAiEnvironment),
     applicationServer(3101, unconfiguredAiEnvironment),
     applicationServer(3102, configuredAiEnvironment, {
@@ -88,5 +102,6 @@ export default defineConfig({
     applicationServer(3103, configuredAiEnvironment, {
       CAPTION_PROVIDER_TIMEOUT_MS: "500",
     }),
+    applicationServer(3104, localOnlyAiEnvironment),
   ],
 });
