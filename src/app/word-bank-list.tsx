@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { LOCAL_LEARNING_DATA_CHANGED_EVENT } from "@/client/local-learning-data-events";
 import { readStudyLibrary } from "@/client/study-video-library";
 import { readWordBank, removeWordBankEntry } from "@/client/word-bank";
 import {
@@ -175,17 +176,30 @@ export function WordBankList() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([readWordBank(), readStudyLibrary().catch(() => [])])
-      .then(([storedEntries, studyVideos]) => {
-        if (!active) return;
-        setEntries(storedEntries);
-        setSourceIds(new Set(studyVideos.map((studyVideo) => studyVideo.id)));
-      })
-      .catch(() => {
-        if (active) setLoadFailed(true);
-      });
+    const load = () => {
+      Promise.all([readWordBank(), readStudyLibrary().catch(() => [])])
+        .then(([storedEntries, studyVideos]) => {
+          if (!active) return;
+          setEntries(storedEntries);
+          setSourceIds(new Set(studyVideos.map((studyVideo) => studyVideo.id)));
+          setLoadFailed(false);
+        })
+        .catch(() => {
+          if (active) setLoadFailed(true);
+        });
+    };
+    const handleLocalDataChange = () => load();
+    load();
+    window.addEventListener(
+      LOCAL_LEARNING_DATA_CHANGED_EVENT,
+      handleLocalDataChange,
+    );
     return () => {
       active = false;
+      window.removeEventListener(
+        LOCAL_LEARNING_DATA_CHANGED_EVENT,
+        handleLocalDataChange,
+      );
     };
   }, []);
 

@@ -640,32 +640,61 @@ input:disabled {
   background: var(--accent);
 }
 
-.study-video-card-copy > a {
+.study-video-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+}
+
+.study-video-actions a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 20px;
-  padding-top: 15px;
   color: var(--text-soft);
-  border-top: 1px solid var(--line);
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
   transition: color 180ms ease;
 }
 
-.study-video-card-copy > a span:last-child {
+.study-video-actions a span:last-child {
   color: var(--accent);
   font-size: 15px;
   transition: transform 180ms ease;
 }
 
-.study-video-card-copy > a:hover {
+.study-video-actions a:hover {
   color: var(--text);
 }
 
-.study-video-card-copy > a:hover span:last-child {
+.study-video-actions a:hover span:last-child {
   transform: translate(2px, -2px);
+}
+
+.study-video-actions button {
+  min-height: 31px;
+  padding: 0 10px;
+  color: #c58d89;
+  border: 1px solid rgba(241, 140, 130, 0.18);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 760;
+  transition:
+    color 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.study-video-actions button:hover {
+  color: #ffd0ca;
+  border-color: rgba(241, 140, 130, 0.36);
+  background: var(--danger-soft);
 }
 
 .study-video-skeleton {
@@ -949,6 +978,140 @@ input:disabled {
   font-size: 9px;
   font-weight: 740;
   text-decoration: none;
+}
+
+.deletion-dialog-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 13, 0.82);
+  backdrop-filter: blur(12px);
+  animation: backdrop-in 180ms ease both;
+}
+
+.deletion-dialog {
+  width: min(560px, 100%);
+  padding: clamp(26px, 4vw, 38px);
+  color: var(--text);
+  border: 1px solid rgba(241, 140, 130, 0.24);
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(241, 140, 130, 0.055), transparent 38%),
+    var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: modal-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.deletion-dialog h2 {
+  margin: 0;
+  font-size: clamp(29px, 5vw, 40px);
+  font-weight: 690;
+  letter-spacing: -0.05em;
+}
+
+.deletion-dialog-target {
+  margin: 11px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.deletion-dialog-explanation {
+  margin: 20px 0 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.85;
+}
+
+.deletion-context-option {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+  margin-top: 23px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(7, 12, 22, 0.54);
+  cursor: pointer;
+}
+
+.deletion-context-option input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.deletion-context-option span {
+  display: grid;
+  gap: 5px;
+}
+
+.deletion-context-option strong {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.deletion-context-option small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.deletion-dialog-error {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  color: #ffc4bd;
+  border: 1px solid rgba(241, 140, 130, 0.24);
+  border-radius: 9px;
+  background: var(--danger-soft);
+  font-size: 10px;
+}
+
+.deletion-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.deletion-dialog-actions button {
+  min-height: 41px;
+  padding: 0 16px;
+  color: var(--text-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.deletion-dialog-actions button:last-child {
+  color: #1d0c0a;
+  border-color: #f18c82;
+  background: #f18c82;
+}
+
+.deletion-dialog-actions button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.deletion-dialog-actions button:last-child:hover:not(:disabled) {
+  border-color: #ffaaa2;
+  background: #ffaaa2;
+}
+
+.deletion-dialog-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 footer {

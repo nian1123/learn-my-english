@@ -42,6 +42,8 @@ DEEPSEEK_MODEL=
 
 有用的最终 Word Lookup 可以保存到 Word Bank。条目会在浏览器中保留词形、所选语境词义、发音、原 Learning Sentence、Study Video 和精确时间区间；即使本地服务停止，已保存的英文内容仍可读取。中文仍默认隐藏。来源 Study Video 仍在学习库时，可从 Word Bank 回到原句并立即播放。
 
+删除 Study Video 时，视频、学习进度和本地修订会一起移除，但 Word Bank 语境默认保留并标记为来源不可用。确认删除时可以选择同时移除只来自该视频的 Word Bank 语境；同一表达在其他 Study Video 中保存的语境不会受到影响。
+
 ## 字幕获取边界
 
 Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。

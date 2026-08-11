@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { announceLocalLearningDataChanged } from "@/client/local-learning-data-events";
+import { deleteStudyVideoLearningData } from "@/client/study-video-deletion";
 import { readStudyLibrary } from "@/client/study-video-library";
 import type { StudyVideo } from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
+
+import { StudyVideoDeletionDialog } from "./study-video-deletion-dialog";
 
 function EmptyLibraryIllustration() {
   return (
@@ -51,6 +55,11 @@ function progressPercent(studyVideo: StudyVideo) {
 export function StudyLibraryList() {
   const [studyVideos, setStudyVideos] = useState<StudyVideo[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [deletionTarget, setDeletionTarget] = useState<StudyVideo | null>(null);
+  const [removeWordBankContexts, setRemoveWordBankContexts] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState<
+    "idle" | "deleting" | "error"
+  >("idle");
 
   useEffect(() => {
     let active = true;
@@ -67,6 +76,41 @@ export function StudyLibraryList() {
       active = false;
     };
   }, []);
+
+  const cancelDeletion = useCallback(() => {
+    if (deletionStatus === "deleting") return;
+    setDeletionTarget(null);
+    setRemoveWordBankContexts(false);
+    setDeletionStatus("idle");
+  }, [deletionStatus]);
+
+  const openDeletion = (studyVideo: StudyVideo) => {
+    setDeletionTarget(studyVideo);
+    setRemoveWordBankContexts(false);
+    setDeletionStatus("idle");
+  };
+
+  const confirmDeletion = async () => {
+    if (!deletionTarget || deletionStatus === "deleting") return;
+    setDeletionStatus("deleting");
+    try {
+      await deleteStudyVideoLearningData(
+        deletionTarget.id,
+        removeWordBankContexts
+          ? "remove-word-bank-contexts"
+          : "retain-word-bank-contexts",
+      );
+      setStudyVideos((current) =>
+        current?.filter((studyVideo) => studyVideo.id !== deletionTarget.id) ?? [],
+      );
+      announceLocalLearningDataChanged();
+      setDeletionTarget(null);
+      setRemoveWordBankContexts(false);
+      setDeletionStatus("idle");
+    } catch {
+      setDeletionStatus("error");
+    }
+  };
 
   const count = studyVideos?.length ?? 0;
   const sentenceCount =
@@ -161,14 +205,35 @@ export function StudyLibraryList() {
                   max="100"
                   value={progressPercent(studyVideo)}
                 />
-                <Link href={`/study/${encodeURIComponent(studyVideo.id)}`}>
-                  <span>继续学习</span>
-                  <span aria-hidden="true">↗</span>
-                </Link>
+                <div className="study-video-actions">
+                  <Link href={`/study/${encodeURIComponent(studyVideo.id)}`}>
+                    <span>继续学习</span>
+                    <span aria-hidden="true">↗</span>
+                  </Link>
+                  <button
+                    aria-label={`删除 Study Video：${studyVideo.title}`}
+                    onClick={() => openDeletion(studyVideo)}
+                    type="button"
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
             </article>
           ))}
         </div>
+      ) : null}
+
+      {deletionTarget ? (
+        <StudyVideoDeletionDialog
+          deleting={deletionStatus === "deleting"}
+          error={deletionStatus === "error"}
+          onCancel={cancelDeletion}
+          onConfirm={() => void confirmDeletion()}
+          onRemoveWordBankContextsChange={setRemoveWordBankContexts}
+          removeWordBankContexts={removeWordBankContexts}
+          studyVideo={deletionTarget}
+        />
       ) : null}
     </section>
   );

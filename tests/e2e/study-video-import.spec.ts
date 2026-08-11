@@ -1623,6 +1623,168 @@ test("Word Bank preserves contextual lookups, distinct videos, and exact sentenc
   ).toHaveCount(1);
 });
 
+test("Study Video deletion keeps or atomically removes only its Word Bank contexts", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4174/reset");
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "查询 practice" }).click();
+  let lookup = page.getByRole("complementary", {
+    name: "Word Lookup: practice",
+  });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/autocaps001",
+  });
+  await page.getByRole("button", { name: "查询 Practice" }).click();
+  lookup = page.getByRole("complementary", { name: "Word Lookup: Practice" });
+  await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
+  await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
+  await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+
+  await page.goto("/");
+  const studyVideoCards = page.locator(".study-video-card");
+  const manualVideoCard = page.locator(
+    '.study-video-card:has(a[href="/study/study-video-nocaptions1"])',
+  );
+  const automaticVideoCard = page.locator(
+    '.study-video-card:has(a[href="/study/study-video-autocaps001"])',
+  );
+  let bankEntries = page.getByRole("article", { name: /Word Bank: practice/i });
+  let manualBankEntry = bankEntries.filter({
+    hasText: "Today we're talking about practice.",
+  });
+  let automaticBankEntry = bankEntries.filter({
+    hasText: "Practice with automatic captions.",
+  });
+  await expect(studyVideoCards).toHaveCount(2);
+  await expect(bankEntries).toHaveCount(2);
+
+  await manualVideoCard
+    .getByRole("button", { name: /删除 Study Video/ })
+    .click();
+  let confirmation = page.getByRole("dialog", { name: "删除 Study Video？" });
+  await expect(confirmation).toContainText(
+    "默认保留 Word Bank 中已保存的表达和原 Learning Sentence",
+  );
+  let removeContexts = confirmation.getByRole("checkbox", {
+    name: /同时移除仅来自该视频的 Word Bank 语境/,
+  });
+  await expect(removeContexts).not.toBeChecked();
+  await confirmation.getByRole("button", { name: "取消" }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(studyVideoCards).toHaveCount(2);
+  await expect(bankEntries).toHaveCount(2);
+
+  await page.reload();
+  await expect(studyVideoCards).toHaveCount(2);
+  await expect(bankEntries).toHaveCount(2);
+
+  await manualVideoCard
+    .getByRole("button", { name: /删除 Study Video/ })
+    .click();
+  confirmation = page.getByRole("dialog", { name: "删除 Study Video？" });
+  await page.evaluate(() => {
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    Reflect.set(window, "__originalIdbTransaction", originalTransaction);
+    Reflect.set(
+      IDBDatabase.prototype,
+      "transaction",
+      function (
+        this: IDBDatabase,
+        storeNames: string | string[],
+        mode?: IDBTransactionMode,
+        options?: IDBTransactionOptions,
+      ) {
+        const names = typeof storeNames === "string" ? [storeNames] : storeNames;
+        if (
+          mode === "readwrite" &&
+          names.includes("study-videos") &&
+          names.includes("word-bank")
+        ) {
+          throw new DOMException("Simulated interrupted deletion", "AbortError");
+        }
+        return Reflect.apply(originalTransaction, this, [
+          storeNames,
+          mode,
+          options,
+        ]);
+      },
+    );
+  });
+  await confirmation.getByRole("button", { name: "删除视频" }).click();
+  await expect(
+    confirmation.getByRole("alert").filter({ hasText: "本地数据没有改变" }),
+  ).toBeVisible();
+  await expect(studyVideoCards).toHaveCount(2);
+  await expect(bankEntries).toHaveCount(2);
+  await page.evaluate(() => {
+    Reflect.set(
+      IDBDatabase.prototype,
+      "transaction",
+      Reflect.get(window, "__originalIdbTransaction"),
+    );
+  });
+
+  await confirmation.getByRole("button", { name: "删除视频" }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(manualVideoCard).toHaveCount(0);
+  await expect(studyVideoCards).toHaveCount(1);
+  await expect(manualBankEntry).toContainText("来源 Study Video 已不在学习库");
+  await expect(
+    manualBankEntry.getByRole("link", { name: "回到原句并播放" }),
+  ).toHaveCount(0);
+  await expect(
+    automaticBankEntry.getByRole("link", { name: "回到原句并播放" }),
+  ).toBeVisible();
+
+  await page.reload();
+  bankEntries = page.getByRole("article", { name: /Word Bank: practice/i });
+  manualBankEntry = bankEntries.filter({
+    hasText: "Today we're talking about practice.",
+  });
+  automaticBankEntry = bankEntries.filter({
+    hasText: "Practice with automatic captions.",
+  });
+  await expect(studyVideoCards).toHaveCount(1);
+  await expect(bankEntries).toHaveCount(2);
+  await expect(manualBankEntry).toContainText("来源 Study Video 已不在学习库");
+
+  await automaticVideoCard
+    .getByRole("button", { name: /删除 Study Video/ })
+    .click();
+  confirmation = page.getByRole("dialog", { name: "删除 Study Video？" });
+  removeContexts = confirmation.getByRole("checkbox", {
+    name: /同时移除仅来自该视频的 Word Bank 语境/,
+  });
+  await removeContexts.check();
+  await confirmation.getByRole("button", { name: "删除视频" }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(studyVideoCards).toHaveCount(0);
+  await expect(bankEntries).toHaveCount(1);
+  await expect(manualBankEntry).toBeVisible();
+  await expect(automaticBankEntry).toHaveCount(0);
+
+  await page.reload();
+  await expect(studyVideoCards).toHaveCount(0);
+  await expect(
+    page.getByRole("article", { name: /Word Bank: practice/i }),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .getByRole("article", { name: /Word Bank: practice/i })
+      .filter({ hasText: "Today we're talking about practice." }),
+  ).toBeVisible();
+});
+
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
   page,
 }) => {
