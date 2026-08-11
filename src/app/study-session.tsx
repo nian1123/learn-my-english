@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   DEFAULT_LEARNER_PREFERENCES,
@@ -10,7 +10,14 @@ import {
 import {
   readStudyVideo,
   updateStudyPosition,
+  updateStudyVideo,
 } from "@/client/study-video-library";
+import {
+  applyLocalRevision,
+  effectiveLearningSentences,
+  hasLocalRevisions,
+  type LocalRevisionCommand,
+} from "@/domain/local-revision";
 import type {
   LearningSentence,
   LearningSentenceId,
@@ -19,6 +26,7 @@ import type {
 } from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
 
+import { LearningSentenceEditor } from "./learning-sentence-editor";
 import { YouTubePlayer, type YouTubePlayerHandle } from "./youtube-player";
 
 export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
@@ -36,6 +44,9 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     number[]
   >([]);
   const [transcriptHidden, setTranscriptHidden] = useState(false);
+  const [editingSentenceId, setEditingSentenceId] =
+    useState<LearningSentenceId | null>(null);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
   const playerRef = useRef<YouTubePlayerHandle>(null);
   const activeSentenceRef = useRef<HTMLButtonElement>(null);
   const selectedSentenceIdRef = useRef<LearningSentenceId | null>(null);
@@ -51,6 +62,10 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     toggleRepeat: () => undefined,
     toggleTranscript: () => undefined,
   });
+  const learningSentences = useMemo(
+    () => (studyVideo ? effectiveLearningSentences(studyVideo) : []),
+    [studyVideo],
+  );
 
   const persistPosition = useCallback(
     (positionSeconds: number) => {
@@ -79,7 +94,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
       }
 
       const nextActiveSentenceId =
-        studyVideo?.learningSentences.find(
+        learningSentences.find(
           (sentence) =>
             positionSeconds >= sentence.startSeconds &&
             positionSeconds < sentence.endSeconds,
@@ -92,7 +107,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
         current === nextActiveSentenceId ? current : nextActiveSentenceId,
       );
     },
-    [repeatSentenceId, studyVideo?.learningSentences],
+    [learningSentences, repeatSentenceId],
   );
 
   useEffect(() => {
@@ -188,14 +203,13 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
 
   const selectedSentenceId =
     activeSentenceId ?? repeatSentenceId ?? selectedSentenceIdRef.current;
-  const activeSentenceIndex = studyVideo.learningSentences.findIndex(
+  const activeSentenceIndex = learningSentences.findIndex(
     (sentence) => sentence.id === selectedSentenceId,
   );
   const selectedSentenceIndex =
     activeSentenceIndex >= 0 ? activeSentenceIndex : 0;
   const playAdjacentSentence = (offset: -1 | 1) => {
-    const nextSentence =
-      studyVideo.learningSentences[selectedSentenceIndex + offset];
+    const nextSentence = learningSentences[selectedSentenceIndex + offset];
     if (nextSentence) playSentence(nextSentence);
   };
   const toggleRepeat = () => {
@@ -205,7 +219,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
       return;
     }
 
-    const sentence = studyVideo.learningSentences[selectedSentenceIndex];
+    const sentence = learningSentences[selectedSentenceIndex];
     if (!sentence) return;
     selectedSentenceIdRef.current = sentence.id;
     setActiveSentenceId(sentence.id);
@@ -216,6 +230,69 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
     });
   };
   const toggleTranscript = () => setTranscriptHidden((current) => !current);
+
+  const applyRevision = async (command: LocalRevisionCommand) => {
+    let selectedAfterRevision: LearningSentenceId | null = null;
+    const updated = await updateStudyVideo(studyVideo.id, (storedStudyVideo) => {
+      const result = applyLocalRevision(storedStudyVideo, command);
+      selectedAfterRevision = result.selectedSentenceId;
+      return {
+        ...result.studyVideo,
+        lastStudiedAt: new Date().toISOString(),
+      };
+    });
+    if (!updated || !selectedAfterRevision) {
+      throw new Error("找不到要修订的 Study Video");
+    }
+
+    const nextSentences = effectiveLearningSentences(updated);
+    const previousRepeatStillExists = nextSentences.some(
+      (sentence) => sentence.id === repeatSentenceId,
+    );
+    const commandTargetsRepeat =
+      command.type === "restore-all" ||
+      ("sentenceId" in command && command.sentenceId === repeatSentenceId);
+    const nextRepeatId = repeatSentenceId
+      ? commandTargetsRepeat || !previousRepeatStillExists
+        ? selectedAfterRevision
+        : repeatSentenceId
+      : null;
+
+    setStudyVideo(updated);
+    setEditingSentenceId(null);
+    setRevisionError(null);
+    selectedSentenceIdRef.current = selectedAfterRevision;
+    setActiveSentenceId(selectedAfterRevision);
+    if (nextRepeatId) {
+      const repeatedSentence = nextSentences.find(
+        (sentence) => sentence.id === nextRepeatId,
+      );
+      setRepeatSentenceId(nextRepeatId);
+      playerRef.current?.setRepeatInterval(
+        repeatedSentence
+          ? {
+              endSeconds: repeatedSentence.endSeconds,
+              startSeconds: repeatedSentence.startSeconds,
+            }
+          : null,
+      );
+    }
+  };
+
+  const restoreAll = () => {
+    if (
+      !window.confirm(
+        "恢复整个 Study Video 会放弃所有 Local Revision，是否继续？",
+      )
+    ) {
+      return;
+    }
+    void applyRevision({ type: "restore-all" }).catch((cause) =>
+      setRevisionError(
+        cause instanceof Error ? cause.message : "原始结果未能恢复",
+      ),
+    );
+  };
 
   keyboardActionsRef.current = {
     nextSentence: () => playAdjacentSentence(1),
@@ -282,7 +359,7 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
             <button
               disabled={
                 selectedSentenceIndex ===
-                studyVideo.learningSentences.length - 1
+                learningSentences.length - 1
               }
               onClick={() => playAdjacentSentence(1)}
               type="button"
@@ -338,8 +415,20 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
               <p className="eyebrow">LEARNING SENTENCES</p>
               <h2 id="sentence-title">逐句练习</h2>
             </div>
-            <span>{studyVideo.learningSentences.length} 句</span>
+            <div className="sentence-heading-actions">
+              {hasLocalRevisions(studyVideo) ? (
+                <button onClick={restoreAll} type="button">
+                  恢复整个 Study Video 的原始结果
+                </button>
+              ) : null}
+              <span>{learningSentences.length} 句</span>
+            </div>
           </div>
+          {revisionError ? (
+            <p className="sentence-editor-error" role="alert">
+              {revisionError}
+            </p>
+          ) : null}
           <ol
             className={
               transcriptHidden
@@ -347,26 +436,53 @@ export function StudySession({ studyVideoId }: { studyVideoId: StudyVideoId }) {
                 : "sentence-list"
             }
           >
-            {studyVideo.learningSentences.map((sentence, index) => (
-              <li key={sentence.id}>
-                <button
-                  aria-label={`播放第 ${index + 1} 句`}
-                  className={
-                    activeSentenceId === sentence.id
-                      ? "learning-sentence active"
-                      : "learning-sentence"
-                  }
-                  onClick={() => playSentence(sentence)}
-                  ref={
-                    activeSentenceId === sentence.id
-                      ? activeSentenceRef
-                      : undefined
-                  }
-                  type="button"
-                >
-                  <span>{formatMediaTime(sentence.startSeconds)}</span>
-                  <strong>{sentence.text}</strong>
-                </button>
+            {learningSentences.map((sentence, index) => (
+              <li className="learning-sentence-item" key={sentence.id}>
+                <div className="learning-sentence-row">
+                  <button
+                    aria-label={`播放第 ${index + 1} 句`}
+                    className={
+                      activeSentenceId === sentence.id
+                        ? "learning-sentence active"
+                        : "learning-sentence"
+                    }
+                    onClick={() => playSentence(sentence)}
+                    ref={
+                      activeSentenceId === sentence.id
+                        ? activeSentenceRef
+                        : undefined
+                    }
+                    type="button"
+                  >
+                    <span>{formatMediaTime(sentence.startSeconds)}</span>
+                    <strong>{sentence.text}</strong>
+                    {sentence.revised ? <em>Local Revision</em> : null}
+                  </button>
+                  <button
+                    aria-expanded={editingSentenceId === sentence.id}
+                    aria-label={`编辑第 ${index + 1} 句`}
+                    className="edit-sentence-button"
+                    onClick={() =>
+                      setEditingSentenceId((current) =>
+                        current === sentence.id ? null : sentence.id,
+                      )
+                    }
+                    type="button"
+                  >
+                    编辑
+                  </button>
+                </div>
+                {editingSentenceId === sentence.id ? (
+                  <LearningSentenceEditor
+                    canMergeNext={index < learningSentences.length - 1}
+                    canMergePrevious={index > 0}
+                    index={index}
+                    key={sentence.id}
+                    onApply={applyRevision}
+                    onCancel={() => setEditingSentenceId(null)}
+                    sentence={sentence}
+                  />
+                ) : null}
               </li>
             ))}
           </ol>

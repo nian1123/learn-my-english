@@ -619,6 +619,161 @@ test("Chinese shortcut guide matches the available listening controls", async ({
     ]);
 });
 
+test("a Local Revision validates, persists, drives playback, and restores one sentence", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "编辑第 2 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 2 句" });
+  await editor.getByLabel("开始时间（秒）").fill("7");
+  await editor.getByLabel("结束时间（秒）").fill("6");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+  await expect(editor.getByRole("alert")).toContainText("结束时间必须晚于开始时间");
+
+  await editor.getByLabel("句子文本").fill("Today we practice careful listening.");
+  await editor.getByLabel("开始时间（秒）").fill("4.5");
+  await editor.getByLabel("结束时间（秒）").fill("6.5");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+
+  await expect(
+    page.getByText("Today we practice careful listening.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Local Revision", { exact: true })).toBeVisible();
+  const persistedLayers = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = window.indexedDB.open("learn-my-english");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const stored = await new Promise<unknown[]>((resolve, reject) => {
+      const request = database
+        .transaction("study-videos", "readonly")
+        .objectStore("study-videos")
+        .getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    const studyVideo = stored[0] as {
+      captionSource: { cues: Array<{ text: string }> };
+      learningSentences: Array<{ text: string }>;
+      localRevision: { sentences: Array<{ text: string }> };
+    };
+    return {
+      captionSourceText: studyVideo.captionSource.cues[1].text,
+      originalLearningSentence: studyVideo.learningSentences[1].text,
+      revisedLearningSentence: studyVideo.localRevision.sentences[1].text,
+    };
+  });
+  expect(persistedLayers).toEqual({
+    captionSourceText: "Today we're talking about practice.",
+    originalLearningSentence: "Today we're talking about practice.",
+    revisedLearningSentence: "Today we practice careful listening.",
+  });
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("button", { name: "播放第 2 句" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4.5 },
+      { method: "playVideo" },
+    ]);
+
+  await page.reload();
+  await expect(
+    page.getByText("Today we practice careful listening.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "播放第 2 句" }).click();
+  const revisedRepeatButton = page.getByRole("button", { name: /单句循环/ });
+  await revisedRepeatButton.click();
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(6.5));
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([{ method: "pauseVideo" }]);
+  await revisedRepeatButton.click();
+  await page.getByRole("button", { name: "编辑第 2 句" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "恢复这一句" }).click();
+
+  await expect(
+    page.getByText("Today we're talking about practice.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Local Revision", { exact: true })).toHaveCount(0);
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("button", { name: "播放第 2 句" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([
+      { method: "seekTo", seconds: 4 },
+      { method: "playVideo" },
+    ]);
+});
+
+test("the learner can split, merge, and restore all original Learning Sentences", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  const firstEditor = page.getByRole("region", { name: "编辑第 1 句" });
+  await firstEditor.getByLabel("拆分位置").selectOption({ index: 1 });
+  await firstEditor.getByRole("button", { name: "拆分句子" }).click();
+  await expect(page.getByText("3 句", { exact: true })).toBeVisible();
+  await expect(page.getByText("Local Revision", { exact: true })).toHaveCount(2);
+
+  await page.getByRole("button", { name: "编辑第 2 句" }).click();
+  const secondEditor = page.getByRole("region", { name: "编辑第 2 句" });
+  await expect(
+    secondEditor.getByRole("button", { name: "与上一句合并" }),
+  ).toBeEnabled();
+  await expect(
+    secondEditor.getByRole("button", { name: "与下一句合并" }),
+  ).toBeEnabled();
+  await secondEditor.getByLabel("句子文本").fill("to our show.");
+  await secondEditor.getByRole("button", { name: "保存修订" }).click();
+
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  await page
+    .getByRole("region", { name: "编辑第 1 句" })
+    .getByRole("button", { name: "与下一句合并" })
+    .click();
+  await expect(page.getByText("2 句", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Welcome to our show.", { exact: true }),
+  ).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "恢复整个 Study Video 的原始结果" })
+    .click();
+  await expect(
+    page.getByText("Welcome to the show.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Today we're talking about practice.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Local Revision", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("学习者提供的 Caption Source · VTT", { exact: true }),
+  ).toBeVisible();
+});
+
 test("continuing a Study Video restores the current Learning Sentence without changing playback", async ({
   page,
 }) => {

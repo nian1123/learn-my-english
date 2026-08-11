@@ -68,6 +68,14 @@ export type LearningSentence = {
   text: string;
 };
 
+export type LocalRevisionSentence = LearningSentence & {
+  originalSentenceIds: LearningSentenceId[];
+};
+
+export type LocalRevision = {
+  sentences: LocalRevisionSentence[];
+};
+
 export type StudyVideo = {
   schemaVersion: 1;
   id: StudyVideoId;
@@ -80,6 +88,7 @@ export type StudyVideo = {
   lastStudiedAt: string;
   captionSource: CaptionSource;
   learningSentences: LearningSentence[];
+  localRevision?: LocalRevision;
 };
 
 export type YouTubeVideoMetadata = {
