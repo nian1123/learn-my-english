@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
 const PROBE_TIMEOUT_MS = 3_000;
 
 function configuredProvider(
-  capability: "local-ai" | "deepseek",
+  capability: "supadata" | "local-ai" | "deepseek",
   variables: readonly (string | undefined)[],
 ): RuntimeDiagnostic {
   const isConfigured = variables.every((value) => Boolean(value?.trim()));
@@ -66,6 +66,9 @@ async function inspectDictionary(): Promise<RuntimeDiagnostic> {
 
 export async function inspectRuntime(): Promise<RuntimeDiagnosticsResponse> {
   const diagnostics = await Promise.all([
+    Promise.resolve(
+      configuredProvider("supadata", [process.env.SUPADATA_API_KEY]),
+    ),
     inspectYtDlp(),
     Promise.resolve(
       configuredProvider("local-ai", [

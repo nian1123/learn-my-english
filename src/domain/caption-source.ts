@@ -336,6 +336,24 @@ export function parseCaptionSource(
   };
 }
 
+export function validateCaptionSourceDuration(
+  captionSource: CaptionSource,
+  durationSeconds: number,
+): CaptionSource {
+  if (
+    captionSource.cues.some(
+      (cue) =>
+        cue.startSeconds >= durationSeconds ||
+        cue.endSeconds > durationSeconds,
+    )
+  ) {
+    throw new CaptionSourceParseError(
+      "Caption Source 的时间范围超出视频时长。请检查它是否属于这个 Study Video。",
+    );
+  }
+  return captionSource;
+}
+
 export function learningSentencesFromCues(
   captionSource: CaptionSource,
 ): LearningSentence[] {

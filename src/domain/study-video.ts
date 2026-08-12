@@ -2,7 +2,8 @@ export type CaptionFormat = "srt" | "vtt";
 export type CaptionSourceKind =
   | "auto-generated"
   | "learner-supplied"
-  | "manual";
+  | "manual"
+  | "platform-provided";
 
 declare const captionCueIdBrand: unique symbol;
 declare const captionSourceIdBrand: unique symbol;

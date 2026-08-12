@@ -78,8 +78,27 @@ async function main() {
   }
 
   const diagnostics = await requestJson("/api/diagnostics");
-  if (!Array.isArray(record(diagnostics.payload)?.diagnostics)) {
+  const runtimeDiagnostics = record(diagnostics.payload)?.diagnostics;
+  if (!Array.isArray(runtimeDiagnostics)) {
     throw new Error("Runtime diagnostics returned an invalid response.");
+  }
+  if (
+    !runtimeDiagnostics.some(
+      (diagnostic) =>
+        record(diagnostic)?.capability === "supadata" &&
+        record(diagnostic)?.status === "configured",
+    )
+  ) {
+    throw new Error("Supadata must be configured for the real provider check.");
+  }
+  if (
+    !runtimeDiagnostics.some(
+      (diagnostic) =>
+        record(diagnostic)?.capability === "yt-dlp" &&
+        record(diagnostic)?.status === "available",
+    )
+  ) {
+    throw new Error("yt-dlp must be available for the real fallback check.");
   }
   report("runtime diagnostics", diagnostics.elapsedMs);
 
@@ -109,7 +128,8 @@ async function main() {
   if (
     typeof captionPayload?.contents !== "string" ||
     !["vtt", "srt"].includes(captionPayload.format) ||
-    !["manual", "auto-generated"].includes(captionPayload.kind)
+    captionPayload.kind !== "platform-provided" ||
+    captionPayload.provider !== "supadata"
   ) {
     throw new Error("Real caption provider returned an invalid Caption Source.");
   }

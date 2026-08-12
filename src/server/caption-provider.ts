@@ -5,19 +5,24 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { CaptionFormat, CaptionSourceKind } from "@/domain/study-video";
+import {
+  CaptionSourceParseError,
+  parseCaptionSource,
+  validateCaptionSourceDuration,
+} from "@/domain/caption-source";
+import type { YouTubeVideoId } from "@/domain/study-video";
+import { captionSourceIdFor } from "@/domain/study-video";
 import { canonicalYouTubeVideoUrl, isYouTubeVideoId } from "@/domain/youtube-url";
+
+import {
+  acquireSupadataEnglishCaptionSource,
+  SupadataCaptionProviderError,
+} from "./supadata-caption-provider";
+import type { AcquiredCaptionSource } from "./caption-acquisition";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAXIMUM_PROCESS_OUTPUT_BYTES = 10 * 1024 * 1024;
 const MAXIMUM_CAPTION_FILE_BYTES = 10 * 1024 * 1024;
-
-export type AcquiredCaptionSource = {
-  contents: string;
-  fileName: string;
-  format: CaptionFormat;
-  kind: Exclude<CaptionSourceKind, "learner-supplied">;
-};
 
 export type CaptionProviderFailureCode =
   | "canceled"
@@ -42,11 +47,72 @@ type ProcessResult = {
   stdout: string;
 };
 
+type YtDlpCaptionTrack = {
+  acquisition: "automatic" | "manual";
+  language: string;
+};
+
 function configuredTimeoutMs(): number {
   const configured = Number(process.env.CAPTION_PROVIDER_TIMEOUT_MS);
   return Number.isFinite(configured) && configured >= 250
     ? Math.min(configured, 120_000)
     : DEFAULT_TIMEOUT_MS;
+}
+
+async function attemptSupadataCaptionSource(
+  videoId: YouTubeVideoId,
+  canonicalUrl: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+  durationSeconds?: number,
+): Promise<AcquiredCaptionSource | null> {
+  if (signal.aborted) {
+    throw new CaptionProviderError("字幕获取已取消。", "canceled", 499);
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort(signal.reason);
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException("Supadata timed out", "TimeoutError"));
+  }, timeoutMs);
+  signal.addEventListener("abort", abort, { once: true });
+
+  try {
+    const captionSource = await acquireSupadataEnglishCaptionSource(
+      canonicalUrl,
+      controller.signal,
+      durationSeconds,
+    );
+    if (!captionSource) return null;
+
+    const parsedCaptionSource = parseCaptionSource(
+      captionSourceIdFor(videoId),
+      captionSource.fileName,
+      captionSource.contents,
+      captionSource.kind,
+    );
+    if (durationSeconds !== undefined) {
+      validateCaptionSourceDuration(parsedCaptionSource, durationSeconds);
+    }
+    return captionSource;
+  } catch (error) {
+    if (signal.aborted) {
+      throw new CaptionProviderError("字幕获取已取消。", "canceled", 499);
+    }
+    if (
+      timedOut ||
+      error instanceof CaptionSourceParseError ||
+      error instanceof SupadataCaptionProviderError
+    ) {
+      return null;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 function runYtDlp(
@@ -179,24 +245,25 @@ function availableLanguages(value: unknown): string[] {
 }
 
 function selectedTrack(value: unknown): {
-  kind: AcquiredCaptionSource["kind"];
+  acquisition: YtDlpCaptionTrack["acquisition"];
   language: string;
 } | null {
   const metadata = record(value);
   if (!metadata) return null;
 
   const manualLanguage = availableLanguages(metadata.subtitles)[0];
-  if (manualLanguage) return { kind: "manual", language: manualLanguage };
+  if (manualLanguage) {
+    return { acquisition: "manual", language: manualLanguage };
+  }
 
   const automaticLanguage = availableLanguages(metadata.automatic_captions)[0];
   return automaticLanguage
-    ? { kind: "auto-generated", language: automaticLanguage }
+    ? { acquisition: "automatic", language: automaticLanguage }
     : null;
 }
 
 async function downloadedCaption(
   directory: string,
-  kind: AcquiredCaptionSource["kind"],
 ): Promise<AcquiredCaptionSource> {
   const fileName = (await readdir(directory)).find((name) =>
     /\.(?:srt|vtt)$/i.test(name),
@@ -223,21 +290,33 @@ async function downloadedCaption(
     contents: await readFile(captionPath, "utf8"),
     fileName,
     format,
-    kind,
+    kind: "platform-provided",
+    provider: "yt-dlp",
   };
 }
 
 export async function acquireEnglishCaptionSource(
   videoId: string,
   signal: AbortSignal,
+  durationSeconds?: number,
 ): Promise<AcquiredCaptionSource> {
   if (!isYouTubeVideoId(videoId)) {
     throw new CaptionProviderError("视频标识无效。", "failed", 400);
   }
 
   const canonicalUrl = canonicalYouTubeVideoUrl(videoId);
-  const deadline = Date.now() + configuredTimeoutMs();
+  const timeoutMs = configuredTimeoutMs();
+  const deadline = Date.now() + timeoutMs;
   const remainingTime = () => Math.max(1, deadline - Date.now());
+  const supadataCaptionSource = await attemptSupadataCaptionSource(
+    videoId,
+    canonicalUrl,
+    signal,
+    Math.max(100, Math.min(10_000, Math.floor(timeoutMs * 0.4))),
+    durationSeconds,
+  );
+  if (supadataCaptionSource) return supadataCaptionSource;
+
   const inspection = await runYtDlp(
     [
       "--ignore-config",
@@ -276,7 +355,7 @@ export async function acquireEnglishCaptionSource(
         "--ignore-config",
         "--no-playlist",
         "--skip-download",
-        track.kind === "manual" ? "--write-subs" : "--write-auto-subs",
+        track.acquisition === "manual" ? "--write-subs" : "--write-auto-subs",
         "--sub-langs",
         track.language,
         "--sub-format",
@@ -290,7 +369,7 @@ export async function acquireEnglishCaptionSource(
       signal,
       remainingTime(),
     );
-    return await downloadedCaption(directory, track.kind);
+    return await downloadedCaption(directory);
   } finally {
     await rm(directory, { force: true, recursive: true });
   }

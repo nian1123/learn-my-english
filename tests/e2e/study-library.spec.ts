@@ -75,6 +75,7 @@ test("learner can open an empty Study Library and inspect readiness", async ({ p
   await page.getByRole("button", { name: "设置与诊断" }).click();
 
   await expect(page.getByRole("heading", { name: "运行状态" })).toBeVisible();
+  await expect(page.getByText("Supadata", { exact: true })).toBeVisible();
   await expect(page.getByText("yt-dlp", { exact: true })).toBeVisible();
   await expect(page.getByText("本地 AI", { exact: true })).toBeVisible();
   await expect(page.getByText("DeepSeek", { exact: true })).toBeVisible();
@@ -90,6 +91,7 @@ test("runtime readiness uses provider boundaries without exposing credentials", 
   await page.goto("/");
   await page.getByRole("button", { name: "设置与诊断" }).click();
 
+  await expect(diagnosticRow(page, "Supadata")).toContainText("已配置");
   await expect(diagnosticRow(page, "yt-dlp")).toContainText("可用");
   await expect(diagnosticRow(page, "本地 AI")).toContainText("已配置");
   await expect(diagnosticRow(page, "DeepSeek")).toContainText("已配置");
@@ -102,6 +104,32 @@ test("runtime readiness uses provider boundaries without exposing credentials", 
 
   expect(diagnosticResponse).not.toContain("e2e-local-secret");
   expect(diagnosticResponse).not.toContain("e2e-deepseek-secret");
+  expect(diagnosticResponse).not.toContain("e2e-supadata-secret");
+});
+
+test("Supadata and yt-dlp readiness are reported independently", async ({
+  page,
+}) => {
+  await page.goto("http://127.0.0.1:3106/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  await expect(diagnosticRow(page, "Supadata")).toContainText("未配置");
+  await expect(diagnosticRow(page, "yt-dlp")).toContainText("可用");
+
+  await page.goto("http://127.0.0.1:3102/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+  await expect(diagnosticRow(page, "Supadata")).toContainText("已配置");
+  await expect(diagnosticRow(page, "yt-dlp")).toContainText("不可用");
+});
+
+test("both caption providers can independently report unavailable", async ({
+  page,
+}) => {
+  await page.goto("http://127.0.0.1:3108/");
+  await page.getByRole("button", { name: "设置与诊断" }).click();
+
+  await expect(diagnosticRow(page, "Supadata")).toContainText("未配置");
+  await expect(diagnosticRow(page, "yt-dlp")).toContainText("不可用");
 });
 
 test("missing optional AI does not block the Study Library", async ({ page }) => {

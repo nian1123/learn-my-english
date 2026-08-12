@@ -21,6 +21,22 @@ const server = createServer((request, response) => {
       videoUrl.includes("nocaptions1") ||
       videoUrl.includes("slowcap0001") ||
       videoUrl.includes("timeout0001") ||
+      videoUrl.includes("supadata001") ||
+      videoUrl.includes("supanonen01") ||
+      videoUrl.includes("supaauth001") ||
+      videoUrl.includes("supabad0001") ||
+      videoUrl.includes("supaover001") ||
+      videoUrl.includes("supafail001") ||
+      videoUrl.includes("supajson001") ||
+      videoUrl.includes("supanet0001") ||
+      videoUrl.includes("supalarge01") ||
+      videoUrl.includes("supachunk01") ||
+      videoUrl.includes("supaquota01") ||
+      videoUrl.includes("supaslow001") ||
+      videoUrl.includes("supajob0001") ||
+      videoUrl.includes("supajobfail") ||
+      videoUrl.includes("supajobwait") ||
+      videoUrl.includes("supajobbad0") ||
       videoUrl.includes("slowvideo01");
 
     if (!knownVideo) {

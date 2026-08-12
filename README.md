@@ -14,15 +14,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
-然后打开 [http://localhost:3000](http://localhost:3000)。点击“设置与诊断”，确认基础词典和浏览器本地数据可用；本地 AI 与 DeepSeek 是可选项。
+然后打开 [http://localhost:3000](http://localhost:3000)。点击“设置与诊断”，确认 Supadata、基础词典和浏览器本地数据状态；Supadata、`yt-dlp`、本地 AI 与 DeepSeek 都是可选项。
 
-`yt-dlp` 只用于尝试自动获取公开英文字幕：它是非官方、可能随 YouTube 改动而失效的可选集成，不影响应用启动或手动字幕流程。需要自动字幕时，请按 [yt-dlp 官方安装说明](https://github.com/yt-dlp/yt-dlp/wiki/Installation)安装最新稳定版，确认 `yt-dlp --version` 可运行；如果可执行文件不在系统 `PATH`，把 `.env.local` 中的 `YT_DLP_PATH` 改为它的绝对路径。
+[Supadata Transcript API](https://docs.supadata.ai/get-transcript) 是首选字幕获取服务。在 `.env.local` 配置 `SUPADATA_API_KEY` 后，应用只会以 `mode=native` 请求 YouTube 已有字幕，不提供 `auto` 或 `generate` 配置，也不会要求 Supadata 生成 AI 转写。[Supadata 当前价格页](https://supadata.ai/pricing)列出的免费方案每月提供 100 credits；原生字幕请求和字幕不可用响应各消耗 1 credit。成功导入后 Caption Source 保存在浏览器本地，重复学习不会再次请求。
+
+Supadata 未配置、额度不足、响应异常或没有英文字幕时，应用自动尝试 `yt-dlp`。它是非官方、可能随 YouTube 改动而失效的可选本机回退，不影响应用启动或手动字幕流程。按 [yt-dlp 官方安装说明](https://github.com/yt-dlp/yt-dlp/wiki/Installation)安装最新稳定版，确认 `yt-dlp --version` 可运行；如果可执行文件不在系统 `PATH`，把 `.env.local` 中的 `YT_DLP_PATH` 改为它的绝对路径。
 
 `.env.local` 中的服务端配置含义如下：
 
 | 配置 | 用途 | 是否必需 |
 | --- | --- | --- |
-| `YT_DLP_PATH` | 自动获取公开英文字幕 | 否；可上传 VTT/SRT 替代 |
+| `SUPADATA_API_KEY` | 首选获取平台已有英文字幕 | 否；未配置时跳过 Supadata |
+| `SUPADATA_API_BASE_URL` | Supadata 服务地址 | 否；默认使用官方 HTTPS v1 端点；仅本机回环测试允许 HTTP |
+| `YT_DLP_PATH` | 本机回退获取公开英文字幕 | 否；可上传 VTT/SRT 替代 |
 | `DICTIONARY_API_BASE_URL` | 基础英文词典 | 是；示例已给出公共服务 |
 | `YOUTUBE_OEMBED_BASE_URL` | 读取公开 YouTube 元数据 | 是；示例已给出官方端点 |
 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | 本地 OpenAI 兼容服务 | 否；三项必须一起配置 |
@@ -34,8 +38,8 @@ npm run dev
 ## 导入第一个 Study Video
 
 1. 在 Study Library 粘贴一个 `youtube.com/watch?v=…` 或 `youtu.be/…` 单视频链接。
-2. 点击“开始导入”。应用会读取公开元数据，通过官方 IFrame Player API 检查可嵌入性与时长，然后优先获取人工英文字幕，没有时再获取自动生成的英文字幕。
-3. 如果自动获取失败、超时或本机缺少 `yt-dlp`，按界面提示上传有效的 `.vtt` 或 `.srt` Caption Source 继续。
+2. 点击“开始导入”。应用会读取公开元数据，通过官方 IFrame Player API 检查可嵌入性与时长，然后依次尝试 Supadata native 字幕和本机 `yt-dlp` 英文字幕。
+3. 如果两种自动获取方式都失败或超时，按界面提示上传有效的 `.vtt` 或 `.srt` Caption Source 继续。
 
 导入过程会显示当前阶段。不可嵌入、不是公开内容、超过 3 小时或 Caption Source 损坏时，应用会用中文说明下一步，并且不会留下半成品 Study Video。
 
@@ -72,7 +76,7 @@ DEEPSEEK_MODEL=
 
 ## 字幕获取边界
 
-Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。自动字幕获取可尝试使用 `yt-dlp`，但可靠回退始终是学习者提供的 Caption Source（`.vtt` 或 `.srt` 格式）。
+Study Video 始终通过 YouTube 官方 IFrame Player API 播放，应用不会下载、代理、缓存或托管视频与音频。字幕获取顺序固定为 Supadata `mode=native`、本机 `yt-dlp`、学习者提供的 VTT/SRT。Supadata 返回非英文内容时会被拒绝；两种自动方式取得的结果统一记录为 Platform-provided Caption Source，不猜测字幕由作者还是 YouTube 自动生成。
 
 ## 确定性验证与发布检查
 
@@ -82,9 +86,9 @@ npm test
 npm run verify:release
 ```
 
-`npm test` 会构建并启动真实的生产应用，但使用本地确定性服务替换词典、YouTube 元数据、`yt-dlp` 和 AI 边界，因此默认测试不依赖网络、真实密钥或第三方响应速度。测试覆盖短视频、约 60 分钟和近 3 小时字幕、完整学习旅程、首查与缓存命中时限，以及浏览器响应、IndexedDB 和备份中不含测试凭证。
+`npm test` 会构建并启动真实的生产应用，但使用本地确定性服务替换词典、YouTube 元数据、Supadata、`yt-dlp` 和 AI 边界，因此默认测试不依赖网络、真实密钥、第三方响应速度或 Supadata credits。测试覆盖短视频、约 60 分钟和近 3 小时字幕、完整学习旅程、首查与缓存命中时限，以及浏览器响应、IndexedDB 和备份中不含测试凭证。
 
-`npm run verify:release` 还会执行类型检查、完整端到端测试和静态安全门禁。静态门禁拒绝普通应用日志、客户端读取 AI 密钥，以及生产浏览器资源中的已配置密钥标记。它不会把密钥内容打印出来。
+`npm run verify:release` 还会执行类型检查、完整端到端测试和静态安全门禁。静态门禁拒绝普通应用日志、客户端读取 Supadata/AI 密钥，以及生产浏览器资源中的已配置密钥标记。它不会把密钥内容打印出来。
 
 ## 可选的真实 provider 检查
 
@@ -94,7 +98,7 @@ npm run verify:release
 REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" npm run test:real-providers
 ```
 
-所选视频必须公开、可嵌入并有英文字幕。该命令只报告检查名称、耗时和成功/失败，不输出响应正文、URL 中的凭证或 API key；它验证真实 YouTube 元数据、英文 Caption Source 和基础词典，并执行 5 秒元数据/查词与 30 秒字幕目标。
+运行中的应用必须配置 `SUPADATA_API_KEY` 且本机 `yt-dlp` 必须可用；所选视频必须公开、可嵌入并且 Supadata 能取得英文 native 字幕。该命令只报告检查名称、耗时和成功/失败，不输出响应正文、URL 中的凭证、字幕内容或 API key；它验证真实 YouTube 元数据、Supadata 配置、`yt-dlp` 回退就绪状态、通过 Supadata 获取的英文 Platform-provided Caption Source 和基础词典，并执行 5 秒元数据/查词与 30 秒字幕目标。
 
 AI 检查必须额外、明确开启；固定请求只包含单词 `practice`、一条示例句和一个词典义项：
 
@@ -103,4 +107,4 @@ REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" REAL_LOCAL
 REAL_YOUTUBE_URL="https://www.youtube.com/watch?v=公开视频标识" REAL_DEEPSEEK_CHECK=1 npm run test:real-providers
 ```
 
-检查 DeepSeek 时，运行中的应用必须暂时不配置 Local AI，否则产品的本地优先策略会先使用 Local AI，检查将按预期失败。任何真实检查失败都应先区分应用回归与第三方波动；自动字幕失败仍应回到学习者提供的 VTT/SRT，而不是放宽数据完整性要求。
+检查 DeepSeek 时，运行中的应用必须暂时不配置 Local AI，否则产品的本地优先策略会先使用 Local AI，检查将按预期失败。任何真实检查失败都应先区分应用回归与第三方波动；Supadata 失败应自动尝试 `yt-dlp`，两者都失败后仍回到学习者提供的 VTT/SRT，而不是放宽数据完整性要求。

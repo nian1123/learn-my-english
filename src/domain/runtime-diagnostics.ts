@@ -1,4 +1,5 @@
 export type RuntimeCapability =
+  | "supadata"
   | "yt-dlp"
   | "local-ai"
   | "deepseek"

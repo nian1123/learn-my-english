@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const externalProviderEnvironment = {
   YT_DLP_PATH: "./tests/fixtures/yt-dlp",
   DICTIONARY_API_BASE_URL: "http://127.0.0.1:4174",
+  SUPADATA_API_BASE_URL: "http://127.0.0.1:4178/v1",
+  SUPADATA_API_KEY: "e2e-supadata-secret",
   YOUTUBE_OEMBED_BASE_URL: "http://127.0.0.1:4175/oembed",
 };
 
@@ -99,6 +101,12 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 10_000,
     },
+    {
+      command: "node tests/fixtures/supadata-provider.mjs",
+      url: "http://127.0.0.1:4178/health",
+      reuseExistingServer: false,
+      timeout: 10_000,
+    },
     applicationServer(3100, configuredAiEnvironment),
     applicationServer(3101, unconfiguredAiEnvironment),
     applicationServer(3102, configuredAiEnvironment, {
@@ -109,5 +117,15 @@ export default defineConfig({
     }),
     applicationServer(3104, localOnlyAiEnvironment),
     applicationServer(3105, defaultTimeoutLocalAiEnvironment),
+    applicationServer(3106, configuredAiEnvironment, {
+      SUPADATA_API_KEY: "",
+    }),
+    applicationServer(3107, configuredAiEnvironment, {
+      CAPTION_PROVIDER_TIMEOUT_MS: "1500",
+    }),
+    applicationServer(3108, configuredAiEnvironment, {
+      SUPADATA_API_KEY: "",
+      YT_DLP_PATH: "./tests/fixtures/missing-yt-dlp",
+    }),
   ],
 });

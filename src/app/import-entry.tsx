@@ -157,8 +157,8 @@ export function ImportEntry() {
             </div>
 
             <p className="import-provider-note">
-              自动字幕获取依赖非官方 yt-dlp，可能因 YouTube
-              变化而失效；失败后仍可上传英文 VTT/SRT 文件。
+              应用会先通过 Supadata 获取平台已有英文字幕；不可用时自动尝试本机
+              yt-dlp，之后仍可上传英文 VTT/SRT 文件。
             </p>
 
             {manualFallbackAvailable ? (

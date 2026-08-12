@@ -9,6 +9,23 @@ const videoUrl = arguments_.find((value) =>
 ) ?? "";
 const videoId = new URL(videoUrl || "https://www.youtube.com/watch?v=invalid")
   .searchParams.get("v");
+const manualCaptionVideoIds = new Set([
+  "dQw4w9WgXcQ",
+  "supaauth001",
+  "supabad0001",
+  "supaover001",
+  "supafail001",
+  "supajson001",
+  "supanet0001",
+  "supalarge01",
+  "supachunk01",
+  "supanonen01",
+  "supaquota01",
+  "supaslow001",
+  "supajobfail",
+  "supajobwait",
+  "supajobbad0",
+]);
 
 if (arguments_.includes("--version")) {
   process.stdout.write("2026.08.10-test\n");
@@ -59,7 +76,7 @@ if (arguments_.includes("--dump-single-json")) {
               : {},
         id: videoId,
         subtitles:
-          videoId === "dQw4w9WgXcQ"
+          manualCaptionVideoIds.has(videoId)
             ? { en: [{ ext: "vtt", url: "https://captions.test/manual" }] }
             : {},
       }),
@@ -118,7 +135,7 @@ if (arguments_.includes("--write-subs")) {
   const directory = pathsIndex >= 0 ? arguments_[pathsIndex + 1] : "";
   if (
     !directory ||
-    videoId !== "dQw4w9WgXcQ" ||
+    !manualCaptionVideoIds.has(videoId) ||
     arguments_[arguments_.indexOf("--sub-langs") + 1] !== "en" ||
     arguments_[arguments_.indexOf("--sub-format") + 1] !== "vtt" ||
     arguments_[arguments_.indexOf("--output") + 1] !== "caption.%(ext)s"
@@ -127,16 +144,24 @@ if (arguments_.includes("--write-subs")) {
   }
 
   mkdirSync(directory, { recursive: true });
-  writeFileSync(
-    join(directory, "caption.en.vtt"),
-    `WEBVTT
+  const contents =
+    videoId !== "dQw4w9WgXcQ"
+      ? `WEBVTT
+
+00:00:01.000 --> 00:00:03.500
+English captions came from the fallback.
+`
+      : `WEBVTT
 
 00:00:01.000 --> 00:00:03.500
 Welcome to the show.
 
 00:00:04.000 --> 00:00:07.000
 Today we're talking about practice.
-`,
+`;
+  writeFileSync(
+    join(directory, "caption.en.vtt"),
+    contents,
   );
   process.exit(0);
 }

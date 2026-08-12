@@ -253,7 +253,12 @@ function isStrictCaptionSource(
     !isRecord(value) ||
     !hasExactKeys(value, ["id", "kind", "format", "fileName", "cues"]) ||
     value.id !== `caption-${youtubeVideoId}` ||
-    !["auto-generated", "learner-supplied", "manual"].includes(
+    ![
+      "auto-generated",
+      "learner-supplied",
+      "manual",
+      "platform-provided",
+    ].includes(
       String(value.kind),
     ) ||
     (value.format !== "srt" && value.format !== "vtt") ||

@@ -386,14 +386,177 @@ test("learner starts automatic caption import with only a YouTube URL", async ({
   await page.getByRole("button", { name: "导入视频" }).click();
 
   await expect(page.getByLabel("Caption Source 文件")).toHaveCount(0);
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill(VALID_VIDEO_URL);
   await page.getByRole("button", { name: "开始导入" }).click();
 
   await expect(
     page.getByRole("heading", { name: "The Daily American Interview" }),
   ).toBeVisible();
   await expect(page.getByText("Welcome to the show.")).toBeVisible();
-  await expect(page.getByText("Manual captions", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Platform-provided captions", { exact: true }),
+  ).toBeVisible();
+});
+
+test("learner imports an immediate native English transcript through Supadata", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  const captionRequestPromise = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/youtube/captions",
+  );
+  const captionResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/youtube/captions",
+  );
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supadata001",
+  });
+  const [captionRequest, captionResponse] = await Promise.all([
+    captionRequestPromise,
+    captionResponsePromise,
+  ]);
+
+  expect(captionRequest.headers()["x-api-key"]).toBeUndefined();
+  expect(await captionResponse.text()).not.toContain("e2e-supadata-secret");
+
+  await expect(page.locator(".learning-sentence-text")).toHaveText([
+    "Supadata native captions stay synchronized.",
+    "The second sentence follows.",
+  ]);
+  await expect(
+    page.getByText("Platform-provided captions", { exact: true }),
+  ).toBeVisible();
+  const persistedStudyVideo = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const openRequest = indexedDB.open("learn-my-english", 4);
+      openRequest.onsuccess = () => resolve(openRequest.result);
+      openRequest.onerror = () => reject(openRequest.error);
+    });
+    const stored = await new Promise<unknown>((resolve, reject) => {
+      const readRequest = database
+        .transaction("study-videos", "readonly")
+        .objectStore("study-videos")
+        .get("study-video-supadata001");
+      readRequest.onsuccess = () => resolve(readRequest.result);
+      readRequest.onerror = () => reject(readRequest.error);
+    });
+    database.close();
+    return stored;
+  });
+  expect(persistedStudyVideo).toMatchObject({
+    captionSource: {
+      fileName: "caption.en.vtt",
+      kind: "platform-provided",
+    },
+  });
+  expect(JSON.stringify(persistedStudyVideo)).not.toContain('"provider":');
+
+  await page.getByRole("button", { name: "播放第 2 句" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toContainEqual({ method: "seekTo", seconds: 4 });
+});
+
+test("caption API does not expose a provider mode override", async ({ request }) => {
+  for (const mode of ["auto", "generate", "native"]) {
+    const response = await request.post("/api/youtube/captions", {
+      data: { durationSeconds: 74, mode, videoId: "supadata001" },
+    });
+
+    expect(response.status()).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "字幕请求格式无效。",
+    });
+  }
+});
+
+test("non-English Supadata results fall back to an English platform Caption Source", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supanonen01",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("这不是英文字幕。", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Platform-provided captions", { exact: true }),
+  ).toBeVisible();
+});
+
+for (const fallbackCase of [
+  { label: "authorization failure", videoId: "supaauth001" },
+  { label: "invalid transcript data", videoId: "supabad0001" },
+  { label: "provider failure", videoId: "supafail001" },
+  { label: "malformed JSON", videoId: "supajson001" },
+  { label: "network failure", videoId: "supanet0001" },
+  { label: "oversized response", videoId: "supalarge01" },
+  { label: "oversized chunked response", videoId: "supachunk01" },
+  { label: "quota exhaustion", videoId: "supaquota01" },
+]) {
+  test(`Supadata ${fallbackCase.label} falls back to yt-dlp`, async ({ page }) => {
+    await installYouTubePlayerBoundary(page, { duration: 74 });
+    await submitStudyVideoImport(page, {
+      uploadCaption: false,
+      videoUrl: `https://youtu.be/${fallbackCase.videoId}`,
+    });
+
+    await expect(
+      page.getByText("English captions came from the fallback.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Platform-provided captions", { exact: true }),
+    ).toBeVisible();
+  });
+}
+
+test("an out-of-duration Supadata transcript falls back before persistence", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supaover001",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("This caption ends beyond the video duration.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+});
+
+test("an unconfigured Supadata key preserves automatic yt-dlp acquisition", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    rootUrl: "http://127.0.0.1:3106/",
+    uploadCaption: false,
+  });
+
+  await expect(page.getByText("Welcome to the show.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Platform-provided captions", { exact: true }),
+  ).toBeVisible();
 });
 
 test("automatic English captions are used when manual captions are absent", async ({
@@ -415,7 +578,7 @@ test("automatic English captions are used when manual captions are absent", asyn
   ]);
   await expect(page.getByText("2 句")).toBeVisible();
   await expect(
-    page.getByText("Auto-generated captions", { exact: true }),
+    page.getByText("Platform-provided captions", { exact: true }),
   ).toBeVisible();
 });
 
@@ -504,13 +667,140 @@ test("caption acquisition timeout offers manual VTT or SRT fallback", async ({
   await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
 });
 
+test("a slow Supadata attempt leaves time for yt-dlp fallback", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  const startedAt = Date.now();
+  await submitStudyVideoImport(page, {
+    rootUrl: "http://127.0.0.1:3107/",
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supaslow001",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+  expect(Date.now() - startedAt).toBeLessThan(3_000);
+});
+
+test("learner imports a completed asynchronous native Supadata transcript", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supajob0001",
+  });
+
+  await expect(
+    page.getByText("The asynchronous transcript completed.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Platform-provided captions", { exact: true }),
+  ).toBeVisible();
+});
+
+test("a failed asynchronous Supadata job falls back to yt-dlp", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supajobfail",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+});
+
+test("an invalid asynchronous Supadata job falls back to yt-dlp", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supajobbad0",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+});
+
+test("a never-completing Supadata job leaves time for yt-dlp", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    rootUrl: "http://127.0.0.1:3107/",
+    uploadCaption: false,
+    videoUrl: "https://youtu.be/supajobwait",
+  });
+
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toBeVisible();
+});
+
+test("canceling an asynchronous Supadata job does not start yt-dlp", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/supajobwait");
+  await page.getByRole("button", { name: "开始导入" }).click();
+  await expect(page.getByText("正在获取平台已有英文字幕…")).toBeVisible();
+  await page.waitForTimeout(100);
+  await page.getByRole("button", { name: "取消导入" }).click();
+  await page.waitForTimeout(1_200);
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toHaveCount(0);
+});
+
+test("going offline during Supadata polling stops the provider chain", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "导入视频" }).click();
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/supajobwait");
+  await page.getByRole("button", { name: "开始导入" }).click();
+  await expect(page.getByText("正在获取平台已有英文字幕…")).toBeVisible();
+
+  await setReportedNetworkState(page, false);
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "网络连接已断开" }),
+  ).toContainText("自动获取已停止");
+  await expect(page.getByLabel("Caption Source 文件")).toBeVisible();
+  await page.waitForTimeout(1_200);
+  await expect(
+    page.getByText("English captions came from the fallback.", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "取消导入" }).click();
+  await expect(page.getByText("还没有学习视频")).toBeVisible();
+});
+
 test("missing yt-dlp offers installation guidance and file fallback", async ({
   page,
 }) => {
   await installYouTubePlayerBoundary(page, { duration: 74 });
   await page.goto("http://127.0.0.1:3102/");
   await page.getByRole("button", { name: "导入视频" }).click();
-  await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
+  await page
+    .getByLabel("YouTube 视频链接")
+    .fill("https://youtu.be/supanonen01");
   await page.getByRole("button", { name: "开始导入" }).click();
 
   await expect(
@@ -557,7 +847,7 @@ test("unsafe metadata and out-of-duration provider captions leave no partial Stu
 This cue extends beyond the source video.`,
         fileName: "out-of-duration.vtt",
         format: "vtt",
-        kind: "manual",
+        kind: "platform-provided",
       }),
     });
   });
@@ -572,7 +862,7 @@ This cue extends beyond the source video.`,
   await expect(page.getByText("还没有学习视频")).toBeVisible();
 });
 
-test("caption endpoint rejects unvalidated identifiers before invoking yt-dlp", async ({
+test("caption endpoint rejects unvalidated identifiers before invoking providers", async ({
   request,
 }) => {
   const response = await request.post("/api/youtube/captions", {
@@ -597,7 +887,7 @@ test("canceling slow caption extraction leaves no partial Study Video", async ({
   await page.getByRole("button", { name: "开始导入" }).click();
 
   await expect(
-    page.getByText("正在通过非官方 yt-dlp 获取英文字幕…"),
+    page.getByText("正在获取平台已有英文字幕…"),
   ).toBeVisible();
   await page.getByRole("button", { name: "取消导入" }).click();
   await page.waitForTimeout(800);
@@ -627,7 +917,7 @@ test("a prolonged caption request preserves its stage and offers manual fallback
   await page.getByLabel("YouTube 视频链接").fill(VALID_VIDEO_URL);
   await page.getByRole("button", { name: "开始导入" }).click();
   await expect(
-    page.getByText("正在通过非官方 yt-dlp 获取英文字幕…"),
+    page.getByText("正在获取平台已有英文字幕…"),
   ).toBeVisible();
 
   await page.clock.fastForward(30_000);
@@ -2456,6 +2746,7 @@ test("versioned backup safely round-trips all local learning data", async ({
   expect(backup.data.wordLookups.length).toBeGreaterThan(1);
   expect(backupText).not.toContain("e2e-local-secret");
   expect(backupText).not.toContain("e2e-deepseek-secret");
+  expect(backupText).not.toContain("e2e-supadata-secret");
   expect(backupText).not.toMatch(/data:(?:audio|video)\//);
 
   const backupInput = page.getByLabel("选择备份 JSON");

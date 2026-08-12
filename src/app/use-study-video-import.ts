@@ -9,6 +9,7 @@ import {
   learningSentencesFromCues,
   parseCaptionSource,
   parseLearnerCaptionSource,
+  validateCaptionSourceDuration,
 } from "@/domain/caption-source";
 import type {
   CaptionSource,
@@ -67,7 +68,7 @@ type ValidatedStudyVideoImport = PendingStudyVideoImport & {
 const STAGE_COPY: Record<ImportProgressStage, string> = {
   "reading-metadata": "正在读取视频信息…",
   "checking-embed": "正在检查视频是否可嵌入…",
-  "acquiring-captions": "正在通过非官方 yt-dlp 获取英文字幕…",
+  "acquiring-captions": "正在获取平台已有英文字幕…",
   "parsing-captions": "正在解析 Caption Source…",
   "generating-sentences": "正在生成 Learning Sentence…",
   saving: "正在保存到学习库…",
@@ -77,7 +78,7 @@ type CaptionAcquisition = {
   contents: string;
   fileName: string;
   format: "srt" | "vtt";
-  kind: "auto-generated" | "manual";
+  kind: "platform-provided";
 };
 
 async function waitForDuration(player: PlayerReadiness): Promise<number> {
@@ -164,7 +165,7 @@ function captionAcquisitionResponse(value: unknown): CaptionAcquisition | null {
     candidate.fileName.length > 255 ||
     /[/\\]/.test(candidate.fileName) ||
     (candidate.format !== "srt" && candidate.format !== "vtt") ||
-    (candidate.kind !== "manual" && candidate.kind !== "auto-generated") ||
+    candidate.kind !== "platform-provided" ||
     !candidate.fileName.toLowerCase().endsWith(`.${candidate.format}`)
   ) {
     return null;
@@ -176,24 +177,6 @@ function captionAcquisitionResponse(value: unknown): CaptionAcquisition | null {
     format: candidate.format,
     kind: candidate.kind,
   };
-}
-
-function validateCaptionDuration(
-  captionSource: CaptionSource,
-  durationSeconds: number,
-) {
-  if (
-    captionSource.cues.some(
-      (cue) =>
-        cue.startSeconds >= durationSeconds ||
-        cue.endSeconds > durationSeconds,
-    )
-  ) {
-    throw new CaptionSourceParseError(
-      "Caption Source 的时间范围超出视频时长。请检查它是否属于这个 Study Video。",
-    );
-  }
-  return captionSource;
 }
 
 export function useStudyVideoImport() {
@@ -423,7 +406,10 @@ export function useStudyVideoImport() {
       if (!abortController) return;
       advanceImport("acquiring-captions");
       const captionResponse = await fetch("/api/youtube/captions", {
-        body: JSON.stringify({ videoId: candidate.metadata.videoId }),
+        body: JSON.stringify({
+          durationSeconds: validatedCandidate.durationSeconds,
+          videoId: candidate.metadata.videoId,
+        }),
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -445,7 +431,7 @@ export function useStudyVideoImport() {
       }
 
       await paintImportStage("parsing-captions");
-      const captionSource = validateCaptionDuration(
+      const captionSource = validateCaptionSourceDuration(
         parseCaptionSource(
           captionSourceIdFor(candidate.metadata.videoId),
           acquisition.fileName,
@@ -518,7 +504,7 @@ export function useStudyVideoImport() {
     let persistenceStarted = false;
     try {
       await paintImportStage("parsing-captions");
-      const captionSource = validateCaptionDuration(
+      const captionSource = validateCaptionSourceDuration(
         parseLearnerCaptionSource(
           captionSourceIdFor(candidate.metadata.videoId),
           captionFile.name,

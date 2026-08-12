@@ -402,6 +402,7 @@ export function StudySession({
     "auto-generated": "Auto-generated captions",
     "learner-supplied": `学习者提供的 Caption Source · ${studyVideo.captionSource.format.toUpperCase()}`,
     manual: "Manual captions",
+    "platform-provided": "Platform-provided captions",
   }[studyVideo.captionSource.kind];
   const wordLookupOriginSentence = wordLookupRequest
     ? learningSentences.find(

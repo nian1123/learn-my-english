@@ -13,8 +13,12 @@ The learner's locally retained collection of Study Videos, ordered around resumi
 _Avoid_: Video catalog, content feed
 
 **Caption Source**:
-The English timed text from which Learning Sentences are derived. It may be manually authored, automatically generated, or supplied by the learner.
+The English timed text from which Learning Sentences are derived. It may be platform-provided or supplied by the learner.
 _Avoid_: Transcript provider, subtitle file
+
+**Platform-provided Caption Source**:
+An existing Caption Source made available by the video platform, regardless of whether it was creator-authored or platform-generated.
+_Avoid_: Supadata Caption Source, manual captions, auto-generated captions
 
 **Learning Sentence**:
 The primary practice unit: a complete spoken sentence bounded by punctuation and meaningful pauses, and associated with the matching interval in a Study Video.

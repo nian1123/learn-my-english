@@ -5,21 +5,64 @@ import {
 
 export const runtime = "nodejs";
 
+const MAXIMUM_DURATION_SECONDS = 3 * 60 * 60;
+
+function captionRequest(value: unknown): {
+  durationSeconds?: number;
+  videoId: string;
+} | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  if (
+    Object.keys(payload).some(
+      (key) => key !== "durationSeconds" && key !== "videoId",
+    ) ||
+    typeof payload.videoId !== "string"
+  ) {
+    return null;
+  }
+
+  if (payload.durationSeconds === undefined) {
+    return { videoId: payload.videoId };
+  }
+  if (
+    typeof payload.durationSeconds !== "number" ||
+    !Number.isFinite(payload.durationSeconds) ||
+    payload.durationSeconds <= 0 ||
+    payload.durationSeconds > MAXIMUM_DURATION_SECONDS
+  ) {
+    return null;
+  }
+
+  return {
+    durationSeconds: payload.durationSeconds,
+    videoId: payload.videoId,
+  };
+}
+
 export async function POST(request: Request) {
-  let videoId = "";
+  let parsedRequest: ReturnType<typeof captionRequest>;
   try {
-    const payload: unknown = await request.json();
-    if (typeof payload === "object" && payload !== null && "videoId" in payload) {
-      videoId = typeof payload.videoId === "string" ? payload.videoId : "";
-    }
+    parsedRequest = captionRequest(await request.json());
   } catch {
+    return Response.json({ error: "字幕请求格式无效。" }, { status: 400 });
+  }
+  if (!parsedRequest) {
     return Response.json({ error: "字幕请求格式无效。" }, { status: 400 });
   }
 
   try {
     const captionSource = await acquireEnglishCaptionSource(
-      videoId,
+      parsedRequest.videoId,
       request.signal,
+      parsedRequest.durationSeconds,
     );
     return Response.json(captionSource, {
       headers: { "Cache-Control": "no-store" },

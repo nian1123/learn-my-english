@@ -8,14 +8,18 @@ const textExtensions = new Set([
   ".html",
   ".js",
   ".json",
+  ".log",
   ".map",
+  ".md",
   ".mjs",
+  ".txt",
   ".ts",
   ".tsx",
 ]);
 const sensitiveEnvironmentNames = new Set([
   "OPENAI_API_KEY",
   "DEEPSEEK_API_KEY",
+  "SUPADATA_API_KEY",
 ]);
 
 function unquotedEnvironmentValue(value) {
@@ -34,8 +38,10 @@ async function credentialMarkers() {
   const values = [
     "e2e-local-secret",
     "e2e-deepseek-secret",
+    "e2e-supadata-secret",
     process.env.OPENAI_API_KEY,
     process.env.DEEPSEEK_API_KEY,
+    process.env.SUPADATA_API_KEY,
   ];
   for (const fileName of [".env.local", ".env"]) {
     const contents = await readFile(join(root, fileName), "utf8").catch(
@@ -104,6 +110,19 @@ async function assertNoCredentialsInClientArtifacts() {
   }
 }
 
+async function assertNoCredentialsInTestArtifacts() {
+  const artifactFiles = await filesBelow(join(root, "test-results"));
+  const markers = await credentialMarkers();
+  for (const file of artifactFiles) {
+    const contents = await readFile(file, "utf8");
+    if (markers.some((secret) => contents.includes(secret))) {
+      throw new Error(
+        `credential marker found in test artifact ${relative(root, file)}`,
+      );
+    }
+  }
+}
+
 async function assertNoSensitiveEnvironmentReadsInClientSource() {
   const sourceFiles = await filesBelow(join(root, "src"));
   const offenders = [];
@@ -112,7 +131,7 @@ async function assertNoSensitiveEnvironmentReadsInClientSource() {
     const isClientModule = /^\s*["']use client["'];/m.test(source);
     if (
       isClientModule &&
-      /process\.env\.(?:OPENAI_API_KEY|DEEPSEEK_API_KEY)/.test(source)
+      /process\.env\.(?:OPENAI_API_KEY|DEEPSEEK_API_KEY|SUPADATA_API_KEY)/.test(source)
     ) {
       offenders.push(relative(root, file));
     }
@@ -127,6 +146,7 @@ async function assertNoSensitiveEnvironmentReadsInClientSource() {
 await assertNoOrdinaryApplicationLogs();
 await assertNoSensitiveEnvironmentReadsInClientSource();
 await assertNoCredentialsInClientArtifacts();
+await assertNoCredentialsInTestArtifacts();
 process.stdout.write(
-  "PASS release security: no ordinary app logs, client credential reads, or credential markers in browser assets.\n",
+  "PASS release security: no ordinary app logs, client credential reads, or credential markers in browser/test artifacts.\n",
 );

@@ -18,9 +18,14 @@ const CAPABILITIES: ReadonlyArray<{
   description: string;
 }> = [
   {
+    capability: "supadata",
+    label: "Supadata",
+    description: "平台已有字幕（首选）",
+  },
+  {
     capability: "yt-dlp",
     label: "yt-dlp",
-    description: "自动字幕获取（非官方）",
+    description: "平台已有字幕（本机回退）",
   },
   {
     capability: "local-ai",
