@@ -14,6 +14,10 @@ import {
   type DictionaryLookupResult,
   type DictionaryMeaning,
 } from "@/domain/word-lookup";
+import {
+  isDifficultSentence,
+  type DifficultSentence,
+} from "@/domain/difficult-sentence";
 import type {
   CaptionCue,
   CaptionSource,
@@ -44,7 +48,7 @@ import {
   type CachedWordLookup,
 } from "./word-lookup-cache";
 
-export const LOCAL_LEARNING_BACKUP_SCHEMA_VERSION = 1;
+export const LOCAL_LEARNING_BACKUP_SCHEMA_VERSION = 2;
 export const LOCAL_LEARNING_BACKUP_MAXIMUM_BYTES = 25_000_000;
 
 export type BackupWordLookup = {
@@ -54,13 +58,14 @@ export type BackupWordLookup = {
 
 export type LocalLearningBackup = {
   application: "learn-my-english";
-  backupSchemaVersion: 1;
+  backupSchemaVersion: 2;
   exportedAt: string;
   data: {
     preferences: LearnerPreferences;
     studyLibrary: StudyVideo[];
     wordLookups: BackupWordLookup[];
     wordBank: WordBankEntry[];
+    difficultSentences: DifficultSentence[];
   };
 };
 
@@ -88,6 +93,18 @@ export class LocalLearningBackupValidationError extends Error {
 }
 
 type PlainRecord = Record<string, unknown>;
+
+type LegacyLocalLearningBackup = {
+  application: "learn-my-english";
+  backupSchemaVersion: 1;
+  exportedAt: string;
+  data: {
+    preferences: LearnerPreferences;
+    studyLibrary: StudyVideo[];
+    wordLookups: BackupWordLookup[];
+    wordBank: WordBankEntry[];
+  };
+};
 
 function isRecord(value: unknown): value is PlainRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -510,6 +527,7 @@ function isLocalLearningBackup(value: unknown): value is LocalLearningBackup {
       "studyLibrary",
       "wordLookups",
       "wordBank",
+      "difficultSentences",
     ]) ||
     !isLearnerPreferences(value.data.preferences) ||
     !Array.isArray(value.data.studyLibrary) ||
@@ -517,7 +535,9 @@ function isLocalLearningBackup(value: unknown): value is LocalLearningBackup {
     !Array.isArray(value.data.wordLookups) ||
     !value.data.wordLookups.every(isStrictBackupWordLookup) ||
     !Array.isArray(value.data.wordBank) ||
-    !value.data.wordBank.every(isStrictWordBankEntry)
+    !value.data.wordBank.every(isStrictWordBankEntry) ||
+    !Array.isArray(value.data.difficultSentences) ||
+    !value.data.difficultSentences.every(isDifficultSentence)
   ) {
     return false;
   }
@@ -536,8 +556,52 @@ function isLocalLearningBackup(value: unknown): value is LocalLearningBackup {
       value.data.wordBank.map(
         (entry) => (entry as WordBankEntry).id,
       ),
+    ) &&
+    hasUniqueStrings(
+      value.data.difficultSentences.map(
+        (entry) => (entry as DifficultSentence).id,
+      ),
     )
   );
+}
+
+function migrateLegacyBackup(value: unknown): LocalLearningBackup | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "application",
+      "backupSchemaVersion",
+      "exportedAt",
+      "data",
+    ]) ||
+    value.application !== "learn-my-english" ||
+    value.backupSchemaVersion !== 1 ||
+    !isIsoDate(value.exportedAt) ||
+    !isRecord(value.data) ||
+    !hasExactKeys(value.data, [
+      "preferences",
+      "studyLibrary",
+      "wordLookups",
+      "wordBank",
+    ]) ||
+    !isLearnerPreferences(value.data.preferences) ||
+    !Array.isArray(value.data.studyLibrary) ||
+    !value.data.studyLibrary.every(isStrictStudyVideo) ||
+    !Array.isArray(value.data.wordLookups) ||
+    !value.data.wordLookups.every(isStrictBackupWordLookup) ||
+    !Array.isArray(value.data.wordBank) ||
+    !value.data.wordBank.every(isStrictWordBankEntry)
+  ) {
+    return null;
+  }
+  const legacy = value as LegacyLocalLearningBackup;
+  const migrated: LocalLearningBackup = {
+    application: legacy.application,
+    backupSchemaVersion: 2,
+    exportedAt: legacy.exportedAt,
+    data: { ...legacy.data, difficultSentences: [] },
+  };
+  return isLocalLearningBackup(migrated) ? migrated : null;
 }
 
 export function parseLocalLearningBackupText(
@@ -552,16 +616,20 @@ export function parseLocalLearningBackupText(
   } catch {
     return { status: "invalid", reason: "invalid-json" };
   }
+  if (isLocalLearningBackup(parsed)) {
+    return { status: "valid", backup: parsed };
+  }
+  const migrated = migrateLegacyBackup(parsed);
+  if (migrated) return { status: "valid", backup: migrated };
   if (
     isRecord(parsed) &&
     Object.hasOwn(parsed, "backupSchemaVersion") &&
+    parsed.backupSchemaVersion !== 1 &&
     parsed.backupSchemaVersion !== LOCAL_LEARNING_BACKUP_SCHEMA_VERSION
   ) {
     return { status: "invalid", reason: "unsupported-schema" };
   }
-  return isLocalLearningBackup(parsed)
-    ? { status: "valid", backup: parsed }
-    : { status: "invalid", reason: "invalid-data" };
+  return { status: "invalid", reason: "invalid-data" };
 }
 
 async function readStore(
@@ -589,12 +657,13 @@ export async function exportLocalLearningBackup(): Promise<LocalLearningBackup> 
   const database = await openLearningDatabase();
   try {
     const transaction = database.transaction(Object.values(LEARNING_STORES), "readonly");
-    const [storedPreferences, storedStudyVideos, storedWordLookups, storedWordBank] =
+    const [storedPreferences, storedStudyVideos, storedWordLookups, storedWordBank, storedDifficultSentences] =
       await Promise.all([
         readStore(transaction, LEARNING_STORES.preferences),
         readStore(transaction, LEARNING_STORES.studyVideos),
         readStore(transaction, LEARNING_STORES.wordLookups),
         readStore(transaction, LEARNING_STORES.wordBank),
+        readStore(transaction, LEARNING_STORES.difficultSentences),
       ]);
     if (
       storedPreferences.length > 1 ||
@@ -609,6 +678,9 @@ export async function exportLocalLearningBackup(): Promise<LocalLearningBackup> 
       ) ||
       !storedWordBank.every(
         ({ key, value }) => isStrictWordBankEntry(value) && value.id === key,
+      ) ||
+      !storedDifficultSentences.every(
+        ({ key, value }) => isDifficultSentence(value) && value.id === key,
       )
     ) {
       throw new LocalLearningBackupValidationError();
@@ -630,6 +702,9 @@ export async function exportLocalLearningBackup(): Promise<LocalLearningBackup> 
           value: value as CachedWordLookup | CachedWordLookupAi,
         })),
         wordBank: storedWordBank.map(({ value }) => value as WordBankEntry),
+        difficultSentences: storedDifficultSentences.map(
+          ({ value }) => value as DifficultSentence,
+        ),
       },
     };
     if (!isLocalLearningBackup(backup)) {
@@ -666,6 +741,11 @@ function restoreRecords(backup: LocalLearningBackup): RestoreRecord[] {
     })),
     ...backup.data.wordBank.map((entry) => ({
       storeName: LEARNING_STORES.wordBank,
+      key: entry.id,
+      value: entry,
+    })),
+    ...backup.data.difficultSentences.map((entry) => ({
+      storeName: LEARNING_STORES.difficultSentences,
       key: entry.id,
       value: entry,
     })),

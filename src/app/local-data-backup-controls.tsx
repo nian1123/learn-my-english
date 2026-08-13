@@ -77,12 +77,13 @@ function RestoreConfirmation({
         className="backup-restore-dialog"
         role="dialog"
       >
-        <p className="eyebrow">VALIDATED BACKUP · SCHEMA V1</p>
+        <p className="eyebrow">VALIDATED BACKUP · SCHEMA V2</p>
         <h3 id="backup-restore-title">恢复本地学习数据？</h3>
         <p className="backup-impact-summary">
           这份备份包含 {backup.data.studyLibrary.length} 个 Study Video、
           {backup.data.wordBank.length} 条 Word Bank 语境和
-          {backup.data.wordLookups.length} 条 Word Lookup 缓存。
+          {backup.data.wordLookups.length} 条 Word Lookup 缓存、
+          {backup.data.difficultSentences.length} 条 Difficult Sentence。
         </p>
 
         <div className="backup-mode-options">
@@ -229,7 +230,7 @@ export function LocalDataBackupControls({
         <h3 id="backup-title">本地数据备份</h3>
         <p>
           JSON 包含学习库、字幕、修订、进度、偏好、同意选择、Lookup
-          缓存和 Word Bank；不包含密钥、环境配置或音视频文件。
+          缓存、Word Bank 和 Difficult Sentence；不包含密钥、环境配置或音视频文件。
         </p>
       </div>
       <div className="backup-actions">

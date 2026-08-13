@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -12,6 +13,7 @@ import {
   updateStudyPosition,
   updateStudyVideo,
 } from "@/client/study-video-library";
+import { collectDifficultSentence } from "@/client/difficult-sentence-library";
 import {
   applyLocalRevision,
   effectiveLearningSentences,
@@ -66,6 +68,7 @@ export function StudySession({
   studyVideoId: StudyVideoId;
   targetSentenceId?: string;
 }) {
+  const router = useRouter();
   const { networkStatus } = useStudyLibraryClient();
   const networkAvailable = networkStatus === "online";
   const [studyVideo, setStudyVideo] = useState<StudyVideo | null>(null);
@@ -88,6 +91,9 @@ export function StudySession({
   const [wordLookupRequest, setWordLookupRequest] =
     useState<WordLookupRequest | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [collectionError, setCollectionError] = useState<string | null>(null);
+  const [collectingSentenceId, setCollectingSentenceId] =
+    useState<LearningSentenceId | null>(null);
   const [wordBankReturnMessage, setWordBankReturnMessage] = useState<string | null>(
     null,
   );
@@ -368,6 +374,27 @@ export function StudySession({
     }
   };
 
+  const collectSentence = async (sentenceIndex: number) => {
+    const sentence = learningSentences[sentenceIndex];
+    if (!sentence) return;
+    setCollectionError(null);
+    setCollectingSentenceId(sentence.id);
+    try {
+      const { difficultSentence, created } = await collectDifficultSentence({
+        previousSentence: learningSentences[sentenceIndex - 1],
+        nextSentence: learningSentences[sentenceIndex + 1],
+        sentence,
+        studyVideo,
+      });
+      router.push(
+        `/difficult-sentences/${encodeURIComponent(difficultSentence.id)}${created ? "?generate=1" : ""}`,
+      );
+    } catch {
+      setCollectionError("本地数据不可用，未能加入难句库");
+      setCollectingSentenceId(null);
+    }
+  };
+
   const restoreAll = () => {
     if (
       !window.confirm(
@@ -558,6 +585,11 @@ export function StudySession({
               {selectionError}
             </p>
           ) : null}
+          {collectionError ? (
+            <p className="sentence-selection-error" role="alert">
+              {collectionError}
+            </p>
+          ) : null}
           <VirtualizedLearningSentenceList
             activeIndex={activeSentenceIndex}
             className={
@@ -614,6 +646,15 @@ export function StudySession({
                     type="button"
                   >
                     编辑
+                  </button>
+                  <button
+                    aria-label={`加入第 ${index + 1} 句到难句库`}
+                    className="collect-difficult-sentence-button"
+                    disabled={collectingSentenceId !== null}
+                    onClick={() => void collectSentence(index)}
+                    type="button"
+                  >
+                    {collectingSentenceId === sentence.id ? "正在保存…" : "加入难句"}
                   </button>
                 </div>
                 {editingSentenceId === sentence.id ? (

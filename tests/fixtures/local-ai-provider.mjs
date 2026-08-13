@@ -23,8 +23,12 @@ function untrustedData(body) {
   const content = body?.messages?.find((message) => message.role === "user")
     ?.content;
   if (typeof content !== "string") return {};
-  const prefix = "UNTRUSTED_LOOKUP_DATA=";
-  if (!content.startsWith(prefix)) return {};
+  const prefixes = [
+    "UNTRUSTED_LOOKUP_DATA=",
+    "UNTRUSTED_DIFFICULT_SENTENCE_DATA=",
+  ];
+  const prefix = prefixes.find((candidate) => content.startsWith(candidate));
+  if (!prefix) return {};
   try {
     return JSON.parse(content.slice(prefix.length));
   } catch {
@@ -90,6 +94,51 @@ const server = createServer(async (request, response) => {
     expression: data.expression ?? null,
     task: data.task ?? null,
   });
+
+  if (data.task === "difficult-sentence-analysis") {
+    const sentence = data.sentence ?? "";
+    if (sentence.includes("needs cloud fallback")) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "local provider unavailable" }));
+      return;
+    }
+    const importantText = "talking about practice";
+    const importantStart = sentence.indexOf(importantText);
+    const weakText = "we're";
+    const weakStart = sentence.indexOf(weakText);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify(
+        completion({
+          naturalMeaning: "今天我们在讨论练习这件事。",
+          listeningSkeleton: "we 是主语，are talking 是核心动作，about practice 补充讨论主题。",
+          captureOrder: ["先抓 talking", "再确认主题 practice"],
+          importantItems: importantStart >= 0 ? [{
+            start: importantStart,
+            end: importantStart + importantText.length,
+            text: importantText,
+            contextualMeaning: "讨论练习",
+            informationContribution: "承载本句的核心动作和主题",
+            listeningPriority: "先抓动作 talking，再补主题 practice",
+          }] : [],
+          weakForms: weakStart >= 0 ? [{
+            start: weakStart,
+            end: weakStart + weakText.length,
+            text: weakText,
+            reducedForm: "/wɪr/",
+            listeningCue: "功能成分可能快速连读，请回原视频核对",
+          }, {
+            start: sentence.indexOf("to"),
+            end: sentence.indexOf("to") + 2,
+            text: "to",
+            reducedForm: "/tə/",
+            listeningCue: "非重读时可能弱化，请回原视频核对",
+          }].filter((item) => item.start >= 0) : [],
+        }),
+      ),
+    );
+    return;
+  }
 
   if (data.expression === "talk about") {
     response.writeHead(503, { "content-type": "application/json" });

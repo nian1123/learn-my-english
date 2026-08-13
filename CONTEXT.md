@@ -39,3 +39,7 @@ _Avoid_: Dictionary history, vocabulary catalog
 **Listening Practice**:
 Repeatedly listening to a Learning Sentence with playback speed and transcript visibility controls, without recording or pronunciation scoring.
 _Avoid_: Speaking assessment, pronunciation test
+
+**Difficult Sentence**:
+A browser-owned, versioned snapshot of one Learning Sentence and its exact playable interval, retained with a structured listening analysis for later study.
+_Avoid_: Difficult subtitle, AI sentence, grammar exercise

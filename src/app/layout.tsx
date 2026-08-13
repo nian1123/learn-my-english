@@ -6,6 +6,7 @@ import {
   StudyLibraryClientProvider,
 } from "./study-library-client-context";
 import "./globals.css";
+import { DifficultSentenceCompletionNotice } from "./difficult-sentence-completion-notice";
 
 export const metadata: Metadata = {
   title: "Learn My English",
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <StudyLibraryClientProvider>
           <ConnectivityAlert />
           {children}
+          <DifficultSentenceCompletionNotice />
         </StudyLibraryClientProvider>
       </body>
     </html>

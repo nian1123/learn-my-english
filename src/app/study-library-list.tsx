@@ -58,6 +58,7 @@ export function StudyLibraryList() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<StudyVideo | null>(null);
   const [removeWordBankContexts, setRemoveWordBankContexts] = useState(false);
+  const [removeDifficultSentences, setRemoveDifficultSentences] = useState(false);
   const [deletionStatus, setDeletionStatus] = useState<
     "idle" | "deleting" | "error"
   >("idle");
@@ -82,12 +83,14 @@ export function StudyLibraryList() {
     if (deletionStatus === "deleting") return;
     setDeletionTarget(null);
     setRemoveWordBankContexts(false);
+    setRemoveDifficultSentences(false);
     setDeletionStatus("idle");
   }, [deletionStatus]);
 
   const openDeletion = (studyVideo: StudyVideo) => {
     setDeletionTarget(studyVideo);
     setRemoveWordBankContexts(false);
+    setRemoveDifficultSentences(false);
     setDeletionStatus("idle");
   };
 
@@ -97,9 +100,7 @@ export function StudyLibraryList() {
     try {
       await deleteStudyVideoLearningData(
         deletionTarget.id,
-        removeWordBankContexts
-          ? "remove-word-bank-contexts"
-          : "retain-word-bank-contexts",
+        { removeWordBankContexts, removeDifficultSentences },
       );
       setStudyVideos((current) =>
         current?.filter((studyVideo) => studyVideo.id !== deletionTarget.id) ?? [],
@@ -107,6 +108,7 @@ export function StudyLibraryList() {
       announceLocalLearningDataChanged();
       setDeletionTarget(null);
       setRemoveWordBankContexts(false);
+      setRemoveDifficultSentences(false);
       setDeletionStatus("idle");
     } catch {
       setDeletionStatus("error");
@@ -251,7 +253,9 @@ export function StudyLibraryList() {
             onCancel={cancelDeletion}
             onConfirm={() => void confirmDeletion()}
             onRemoveWordBankContextsChange={setRemoveWordBankContexts}
+            onRemoveDifficultSentencesChange={setRemoveDifficultSentences}
             removeWordBankContexts={removeWordBankContexts}
+            removeDifficultSentences={removeDifficultSentences}
             studyVideo={deletionTarget}
           />
         ) : null}

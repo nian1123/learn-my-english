@@ -1,7 +1,8 @@
 export const LEARNING_DATABASE_NAME = "learn-my-english";
-export const LEARNING_DATABASE_VERSION = 4;
+export const LEARNING_DATABASE_VERSION = 5;
 
 export const LEARNING_STORES = {
+  difficultSentences: "difficult-sentences",
   preferences: "preferences",
   studyVideos: "study-videos",
   wordLookups: "word-lookups",

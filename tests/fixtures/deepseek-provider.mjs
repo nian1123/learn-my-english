@@ -23,8 +23,12 @@ function untrustedData(body) {
   const content = body?.messages?.find((message) => message.role === "user")
     ?.content;
   if (typeof content !== "string") return {};
-  const prefix = "UNTRUSTED_LOOKUP_DATA=";
-  if (!content.startsWith(prefix)) return {};
+  const prefixes = [
+    "UNTRUSTED_LOOKUP_DATA=",
+    "UNTRUSTED_DIFFICULT_SENTENCE_DATA=",
+  ];
+  const prefix = prefixes.find((candidate) => content.startsWith(candidate));
+  if (!prefix) return {};
   try {
     return JSON.parse(content.slice(prefix.length));
   } catch {
@@ -90,6 +94,18 @@ const server = createServer(async (request, response) => {
     expression: data.expression ?? null,
     task: data.task ?? null,
   });
+
+  if (data.task === "difficult-sentence-analysis") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(completion({
+      naturalMeaning: "这是 DeepSeek 生成的整句含义。",
+      listeningSkeleton: "先抓主干，再补上下文。",
+      captureOrder: ["先抓动作"],
+      importantItems: [],
+      weakForms: [],
+    })));
+    return;
+  }
 
   if (data.expression === "talk about") {
     response.writeHead(503, { "content-type": "application/json" });

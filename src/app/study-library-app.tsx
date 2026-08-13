@@ -2,6 +2,7 @@ import { PersistenceAlert } from "./persistence-alert";
 import { SettingsAndDiagnostics } from "./settings-and-diagnostics";
 import { StudyLibraryList } from "./study-library-list";
 import { WordBankList } from "./word-bank-list";
+import { DifficultSentenceLibraryOverview } from "./difficult-sentence-library";
 
 function LibraryMark() {
   return (
@@ -36,6 +37,7 @@ export function StudyLibraryApp() {
       <PersistenceAlert />
 
       <StudyLibraryList />
+      <DifficultSentenceLibraryOverview />
       <WordBankList />
 
       <footer>

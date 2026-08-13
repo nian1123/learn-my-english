@@ -435,7 +435,7 @@ test("learner imports an immediate native English transcript through Supadata", 
   ).toBeVisible();
   const persistedStudyVideo = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 4);
+      const openRequest = indexedDB.open("learn-my-english", 5);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
@@ -964,7 +964,7 @@ test("offline mode keeps local learning data readable and blocks new remote work
 
   const offlineNotice = page.getByRole("status").filter({ hasText: "离线模式" });
   await expect(offlineNotice).toContainText(
-    "可继续查看并编辑本地 Study Library、Caption Sources、Learning Sentences、Local Revisions、Word Lookup 缓存和 Word Bank",
+    "可继续查看并编辑本地 Study Library、Caption Sources、Learning Sentences、Local Revisions、Difficult Sentences、Word Lookup 缓存和 Word Bank",
   );
   await expect(offlineNotice).toContainText(
     "YouTube 播放、导入及新的词典或 AI 请求已停用",
@@ -1057,6 +1057,315 @@ test("learner imports a Study Video with a VTT Caption Source", async ({
     "value",
     "15",
   );
+});
+
+test("learner collects one immutable Difficult Sentence before analysis", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    rootUrl: "http://127.0.0.1:3101/",
+  });
+
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+  await expect(page).toHaveURL(/\/difficult-sentences\//);
+  await expect(
+    page.getByRole("heading", { name: "难句解析", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Pending analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("Welcome to the show.", { exact: true })).toBeVisible();
+  const difficultSentencePath = new URL(page.url()).pathname;
+
+  await page.reload();
+  await expect(page.getByText("Pending analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("Welcome to the show.", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "返回 Study Video" }).click();
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+  await expect(page).toHaveURL(
+    `http://127.0.0.1:3101${difficultSentencePath}`,
+  );
+
+  const storedCount = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("learn-my-english");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const count = await new Promise<number>((resolve, reject) => {
+      const request = database
+        .transaction("difficult-sentences", "readonly")
+        .objectStore("difficult-sentences")
+        .count();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return count;
+  });
+  expect(storedCount).toBe(1);
+});
+
+test("learner manually completes a Difficult Sentence and plays its exact interval", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page, {
+    rootUrl: "http://127.0.0.1:3101/",
+  });
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([]);
+  await page.getByRole("button", { name: "播放句子" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+    ]);
+
+  await page.getByRole("button", { name: "手动填写解析" }).click();
+  await page.getByLabel("整句中文含义").fill("欢迎来到节目。 ");
+  await page
+    .getByLabel("实用听力结构")
+    .fill("主语 you（省略）+ 动作 welcome + 地点/场景 to the show");
+  await page
+    .getByLabel("听力捕捉顺序")
+    .fill("先抓 welcome\n再确认场景 the show");
+  await page.getByRole("button", { name: "添加重点内容" }).click();
+  await page.getByLabel("重点原文 1").fill("Welcome");
+  await page.getByLabel("语境含义 1").fill("欢迎");
+  await page.getByLabel("信息作用 1").fill("承载核心动作");
+  await page.getByLabel("听力优先级 1").fill("先抓这个动作");
+  await page.getByRole("button", { name: "添加弱读预测" }).click();
+  await page.getByLabel("弱读原文 1").fill("to");
+  await page.getByLabel("可能读音 1").fill("/tə/");
+  await page.getByLabel("弱读听力提示 1").fill("非重读时可能弱化");
+  await page.getByRole("button", { name: "保存手动解析" }).click();
+
+  await expect(page.getByText("Learning", { exact: true })).toBeVisible();
+  await expect(page.getByText("Manual analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("欢迎来到节目。", { exact: true })).toBeVisible();
+  await expect(page.getByText("/tə/", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "标记为 Mastered" }).click();
+  await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "改回 Learning" }).click();
+  await expect(page.getByText("Learning", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Manual analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("欢迎来到节目。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "编辑解析" }).click();
+  await page.getByLabel("整句中文含义").fill("欢迎收听这个节目。");
+  await page.getByRole("button", { name: "保存手动解析" }).click();
+  await expect(page.getByText("Edited", { exact: true })).toBeVisible();
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("手动填写或修改");
+    await dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await expect(page.getByText("欢迎收听这个节目。", { exact: true })).toBeVisible();
+});
+
+test("Local AI generates meaning-driven Difficult Sentence annotations", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("今天我们在讨论练习这件事。", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByLabel("难句解析内容")
+      .getByText("talking about practice", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("/wɪr/", { exact: true })).toBeVisible();
+  await expect(page.getByText("文本预测，请回到原视频核对", { exact: false })).toBeVisible();
+  await expect(page.locator("mark[data-annotation='important']")).toHaveText(
+    "talking about practice",
+  );
+  await expect(page.locator("mark[data-annotation='weak-form']")).toHaveText(
+    "we're",
+  );
+  await page.getByRole("button", { name: "隐藏听力标注" }).click();
+  await expect(page.locator("mark[data-annotation]")).toHaveCount(0);
+
+  const providerRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  const difficultRequest = providerRequests.items.find(
+    (item: { task?: string | null }) => item.task === "difficult-sentence-analysis",
+  );
+  expect(difficultRequest).toBeTruthy();
+  expect(JSON.stringify(difficultRequest.body)).toContain(
+    "Today we're talking about practice.",
+  );
+  expect(JSON.stringify(difficultRequest.body)).toContain("Welcome to the show.");
+  expect(JSON.stringify(difficultRequest.body)).not.toContain("wordBank");
+  expect(JSON.stringify(difficultRequest.body)).not.toContain("captionSource");
+});
+
+test("Difficult Sentence generation asks before a minimal DeepSeek fallback", async ({
+  page,
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+  await request.post("http://127.0.0.1:4177/reset");
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 1 句" });
+  await editor
+    .getByLabel("句子文本")
+    .fill("This sentence needs cloud fallback.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+
+  const consent = page.getByText("允许使用 DeepSeek 云端回退？").locator("..");
+  await expect(consent).toContainText(
+    "当前句、上一句、下一句和当前时间范围会发送到 DeepSeek",
+  );
+  await consent.getByRole("button", { name: "同意并使用 DeepSeek" }).click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("这是 DeepSeek 生成的整句含义。", { exact: true }),
+  ).toBeVisible();
+
+  const localRequests = await request
+    .get("http://127.0.0.1:4176/requests")
+    .then((response) => response.json());
+  const deepSeekRequests = await request
+    .get("http://127.0.0.1:4177/requests")
+    .then((response) => response.json());
+  expect(localRequests.items.filter((item: { task?: string }) =>
+    item.task === "difficult-sentence-analysis"
+  )).toHaveLength(2);
+  const deepSeekRequest = deepSeekRequests.items.find(
+    (item: { task?: string }) => item.task === "difficult-sentence-analysis",
+  );
+  expect(deepSeekRequest).toBeTruthy();
+  const disclosed = JSON.stringify(deepSeekRequest.body);
+  expect(disclosed).toContain("This sentence needs cloud fallback.");
+  expect(disclosed).toContain("Today we're talking about practice.");
+  expect(disclosed).not.toContain("wordBank");
+  expect(disclosed).not.toContain("captionSource");
+});
+
+test("Difficult Sentence Library preserves active results and related revisions", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "返回 Study Video" }).click();
+
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "标记为 Mastered" }).click();
+  await page.route("**/api/difficult-sentence-analysis", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      status: 200,
+      body: JSON.stringify({ status: "unavailable", reason: "provider-failure" }),
+    }),
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await expect(page.getByText("自动解析暂时不可用，已保留原解析。")).toBeVisible();
+  await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
+  await page.unroute("**/api/difficult-sentence-analysis");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
+  await page.goto("/");
+
+  const overview = page.getByRole("region", { name: "难句解析库" });
+  await expect(overview).toContainText("Welcome to the show.");
+  await expect(overview).toContainText("Today we're talking about practice.");
+  await overview.getByRole("link", { name: /查看 2 句/ }).click();
+
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.getByLabel("学习状态筛选").selectOption("mastered");
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await expect(
+    page.getByText("Today we're talking about practice.", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("学习状态筛选").selectOption("all");
+  await page.getByLabel("搜索难句").fill("interview");
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.getByLabel("搜索难句").fill("practice");
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await page.getByLabel("搜索难句").fill("");
+
+  await page
+    .getByRole("article")
+    .filter({ hasText: "Welcome to the show." })
+    .getByRole("link", { name: "打开解析" })
+    .click();
+  await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "上一句" }).click();
+  await expect(page.getByText("1 / 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
+    )
+    .toEqual([]);
+
+  await page.getByRole("link", { name: "返回 Study Video" }).click();
+  await page.getByRole("button", { name: "编辑第 2 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 2 句" });
+  await editor
+    .getByLabel("句子文本")
+    .fill("Today we practice careful listening.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+  await expect(
+    page.getByText("Today we practice careful listening.", { exact: true }),
+  ).toBeVisible();
+  await page.goto("/difficult-sentences");
+  await expect(page.getByRole("article")).toHaveCount(3);
+  await expect(
+    page.getByText("同一原视频时间范围还有其他句子版本"),
+  ).toHaveCount(2);
+
+  const revisedCard = page
+    .getByRole("article")
+    .filter({ hasText: "Today we practice careful listening." });
+  await revisedCard.getByRole("link", { name: "打开解析" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除 Difficult Sentence" }).click();
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.goto("/study/study-video-nocaptions1");
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+  await expect(
+    page.getByText("Today we practice careful listening.", { exact: true }),
+  ).toBeVisible();
 });
 
 test("a 60-minute Caption Source stays responsive and has no cumulative sentence drift", async ({
@@ -1961,7 +2270,7 @@ test("local AI selects a supplied dictionary sense without blurring source bound
 
   const persistedLookupData = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 4);
+      const openRequest = indexedDB.open("learn-my-english", 5);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
@@ -2133,7 +2442,7 @@ test("consented DeepSeek fallback is minimal, remembered, and follows Local AI",
   expect(browserAiResponse).not.toContain("e2e-deepseek-secret");
   const persistedBrowserData = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 4);
+      const openRequest = indexedDB.open("learn-my-english", 5);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
@@ -2480,7 +2789,6 @@ test("Word Bank preserves contextual lookups, distinct videos, and exact sentenc
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
-
   await page.goto("/");
   bankEntries = page.getByRole("article", { name: /Word Bank: practice/i });
   await expect(bankEntries).toHaveCount(2);
@@ -2501,7 +2809,7 @@ test("Word Bank preserves contextual lookups, distinct videos, and exact sentenc
   ).toHaveCount(1);
 });
 
-test("Study Video deletion keeps or atomically removes only its Word Bank contexts", async ({
+test("Study Video deletion keeps or atomically removes its related learning data", async ({
   page,
   request,
 }) => {
@@ -2517,6 +2825,11 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
 
   await submitStudyVideoImport(page, {
     uploadCaption: false,
@@ -2527,6 +2840,13 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   await expect(lookup.getByText("Local AI", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "难句解析", exact: true }),
+  ).toBeVisible();
 
   await page.goto("/");
   const studyVideoCards = page.locator(".study-video-card");
@@ -2556,7 +2876,11 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   let removeContexts = confirmation.getByRole("checkbox", {
     name: /同时移除仅来自该视频的 Word Bank 语境/,
   });
+  let removeDifficultSentences = confirmation.getByRole("checkbox", {
+    name: /同时移除该视频的 Difficult Sentences/,
+  });
   await expect(removeContexts).not.toBeChecked();
+  await expect(removeDifficultSentences).not.toBeChecked();
   await confirmation.getByRole("button", { name: "取消" }).click();
   await expect(confirmation).toHaveCount(0);
   await expect(studyVideoCards).toHaveCount(2);
@@ -2623,6 +2947,19 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   await expect(
     automaticBankEntry.getByRole("link", { name: "回到原句并播放" }),
   ).toBeVisible();
+  await page.goto("/difficult-sentences");
+  const manualDifficultSentence = page
+    .getByRole("article")
+    .filter({ hasText: "Today we're talking about practice." });
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await expect(manualDifficultSentence).toContainText(
+    "来源 Study Video 已不在学习库",
+  );
+  await manualDifficultSentence.getByRole("link", { name: "打开解析" }).click();
+  await expect(page.getByRole("button", { name: "播放句子" })).toBeDisabled();
+  await expect(page.getByRole("link", { name: "返回 Study Video" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "编辑解析" })).toBeVisible();
+  await page.goto("/");
 
   await page.reload();
   bankEntries = page.getByRole("article", { name: /Word Bank: practice/i });
@@ -2643,7 +2980,11 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
   removeContexts = confirmation.getByRole("checkbox", {
     name: /同时移除仅来自该视频的 Word Bank 语境/,
   });
+  removeDifficultSentences = confirmation.getByRole("checkbox", {
+    name: /同时移除该视频的 Difficult Sentences/,
+  });
   await removeContexts.check();
+  await removeDifficultSentences.check();
   await confirmation.getByRole("button", { name: "删除视频" }).click();
   await expect(confirmation).toHaveCount(0);
   await expect(studyVideoCards).toHaveCount(0);
@@ -2661,6 +3002,10 @@ test("Study Video deletion keeps or atomically removes only its Word Bank contex
       .getByRole("article", { name: /Word Bank: practice/i })
       .filter({ hasText: "Today we're talking about practice." }),
   ).toBeVisible();
+  await page.goto("/difficult-sentences");
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await expect(page.getByText("Today we're talking about practice.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Practice with automatic captions.", { exact: true })).toHaveCount(0);
 });
 
 test("versioned backup safely round-trips all local learning data", async ({
@@ -2682,6 +3027,11 @@ test("versioned backup safely round-trips all local learning data", async ({
   await expect(lookup.getByText("DeepSeek", { exact: true })).toBeVisible();
   await lookup.getByRole("button", { name: "保存到 Word Bank" }).click();
   await expect(lookup.getByText("已保存到 Word Bank")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", { name: "加入第 2 句到难句库" })
+    .click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
 
   await page.goto("/");
   const manualVideoCard = page.locator(
@@ -2731,7 +3081,7 @@ test("versioned backup safely round-trips all local learning data", async ({
   if (!downloadPath) throw new Error("Backup download did not produce a file");
   const backupText = await readFile(downloadPath, "utf8");
   const backup = JSON.parse(backupText);
-  expect(backup.backupSchemaVersion).toBe(1);
+  expect(backup.backupSchemaVersion).toBe(2);
   expect(backup.application).toBe("learn-my-english");
   expect(backup.data.preferences).toEqual({
     deepSeekCloudConsent: "granted",
@@ -2743,6 +3093,10 @@ test("versioned backup safely round-trips all local learning data", async ({
   );
   expect(backup.data.studyLibrary[0].lastPositionSeconds).toBe(5);
   expect(backup.data.wordBank).toHaveLength(2);
+  expect(backup.data.difficultSentences).toHaveLength(1);
+  expect(backup.data.difficultSentences[0].snapshot.text).toBe(
+    "Today we're talking about practice.",
+  );
   expect(backup.data.wordLookups.length).toBeGreaterThan(1);
   expect(backupText).not.toContain("e2e-local-secret");
   expect(backupText).not.toContain("e2e-deepseek-secret");
@@ -2770,14 +3124,40 @@ test("versioned backup safely round-trips all local learning data", async ({
     page.getByRole("alert").filter({ hasText: "备份结构无效" }),
   ).toBeVisible();
 
+  const malformedDifficultSentenceBackup = structuredClone(backup);
+  malformedDifficultSentenceBackup.data.difficultSentences[0].analysis.importantItems[0].end = 999;
+  await backupInput.setInputFiles({
+    name: "malformed-difficult-sentence-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(malformedDifficultSentenceBackup)),
+  });
+  await expect(
+    page.getByRole("alert").filter({ hasText: "备份结构无效" }),
+  ).toBeVisible();
+
+  const legacyBackup = structuredClone(backup);
+  legacyBackup.backupSchemaVersion = 1;
+  delete legacyBackup.data.difficultSentences;
+  await backupInput.setInputFiles({
+    name: "legacy-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(legacyBackup)),
+  });
+  let restoreConfirmation = page.getByRole("dialog", {
+    name: "恢复本地学习数据？",
+  });
+  await expect(restoreConfirmation).toContainText("0 条 Difficult Sentence");
+  await restoreConfirmation.getByRole("button", { name: "取消恢复" }).click();
+
   const conflictingBackup = structuredClone(backup);
-  conflictingBackup.data.studyLibrary[0].title = "Conflicting restored title";
+  conflictingBackup.data.difficultSentences[0].analysis.naturalMeaning =
+    "Conflicting restored Difficult Sentence analysis";
   await backupInput.setInputFiles({
     name: "conflicting-backup.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(conflictingBackup)),
   });
-  let restoreConfirmation = page.getByRole("dialog", {
+  restoreConfirmation = page.getByRole("dialog", {
     name: "恢复本地学习数据？",
   });
   await expect(restoreConfirmation).toContainText(
@@ -2794,12 +3174,12 @@ test("versioned backup safely round-trips all local learning data", async ({
   ).toBeVisible();
   const stateAfterConflict = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const openRequest = indexedDB.open("learn-my-english", 4);
+      const openRequest = indexedDB.open("learn-my-english", 5);
       openRequest.onsuccess = () => resolve(openRequest.result);
       openRequest.onerror = () => reject(openRequest.error);
     });
     const transaction = database.transaction(
-      ["study-videos", "word-bank"],
+      ["study-videos", "word-bank", "difficult-sentences"],
       "readonly",
     );
     const readAll = (storeName: string) =>
@@ -2808,18 +3188,22 @@ test("versioned backup safely round-trips all local learning data", async ({
         readRequest.onsuccess = () => resolve(readRequest.result);
         readRequest.onerror = () => reject(readRequest.error);
       });
-    const [studyVideos, wordBank] = await Promise.all([
+    const [studyVideos, wordBank, difficultSentences] = await Promise.all([
       readAll("study-videos"),
       readAll("word-bank"),
+      readAll("difficult-sentences"),
     ]);
     database.close();
-    return { studyVideos, wordBank };
+    return { studyVideos, wordBank, difficultSentences };
   });
   expect(stateAfterConflict.studyVideos).toHaveLength(1);
-  expect(stateAfterConflict.studyVideos[0]).not.toMatchObject({
-    title: "Conflicting restored title",
-  });
   expect(stateAfterConflict.wordBank).toHaveLength(2);
+  expect(stateAfterConflict.difficultSentences).toHaveLength(1);
+  expect(stateAfterConflict.difficultSentences[0]).not.toMatchObject({
+    analysis: {
+      naturalMeaning: "Conflicting restored Difficult Sentence analysis",
+    },
+  });
   await restoreConfirmation
     .getByRole("button", { name: "取消恢复" })
     .click();
@@ -2870,6 +3254,17 @@ test("versioned backup safely round-trips all local learning data", async ({
   await expect(
     availableEntry.getByRole("link", { name: "回到原句并播放" }),
   ).toBeVisible();
+  await page.goto("/difficult-sentences");
+  const restoredDifficultSentence = page
+    .getByRole("article")
+    .filter({ hasText: "Today we're talking about practice." });
+  await expect(restoredDifficultSentence).toContainText(
+    "来源 Study Video 已不在学习库",
+  );
+  await restoredDifficultSentence.getByRole("link", { name: "打开解析" }).click();
+  await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "播放句子" })).toBeDisabled();
+  await page.goto("/");
 
   await page.getByRole("button", { name: "设置与诊断" }).click();
   await expect(page.getByRole("checkbox", { name: "默认隐藏字幕" })).toBeChecked();

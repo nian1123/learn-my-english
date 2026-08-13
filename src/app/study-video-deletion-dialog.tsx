@@ -10,7 +10,9 @@ export function StudyVideoDeletionDialog({
   onCancel,
   onConfirm,
   onRemoveWordBankContextsChange,
+  onRemoveDifficultSentencesChange,
   removeWordBankContexts,
+  removeDifficultSentences,
   studyVideo,
 }: {
   deleting: boolean;
@@ -18,7 +20,9 @@ export function StudyVideoDeletionDialog({
   onCancel: () => void;
   onConfirm: () => void;
   onRemoveWordBankContextsChange: (checked: boolean) => void;
+  onRemoveDifficultSentencesChange: (checked: boolean) => void;
   removeWordBankContexts: boolean;
+  removeDifficultSentences: boolean;
   studyVideo: StudyVideo;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -45,8 +49,8 @@ export function StudyVideoDeletionDialog({
         <p className="deletion-dialog-target">{studyVideo.title}</p>
         <p className="deletion-dialog-explanation">
           删除后，该视频、学习进度和本地修订会从学习库移除。默认保留 Word
-          Bank 中已保存的表达和原 Learning Sentence；这些条目会标记为来源不可用，
-          不再提供跳转。
+          Bank 中已保存的表达和原 Learning Sentence，也会保留 Difficult
+          Sentences；保留的条目会标记为来源不可用，不再提供播放或跳转。
         </p>
 
         <label className="deletion-context-option">
@@ -61,6 +65,21 @@ export function StudyVideoDeletionDialog({
           <span>
             <strong>同时移除仅来自该视频的 Word Bank 语境</strong>
             <small>同一表达在其他 Study Video 中保存的语境不会被删除。</small>
+          </span>
+        </label>
+
+        <label className="deletion-context-option">
+          <input
+            checked={removeDifficultSentences}
+            disabled={deleting}
+            onChange={(event) =>
+              onRemoveDifficultSentencesChange(event.currentTarget.checked)
+            }
+            type="checkbox"
+          />
+          <span>
+            <strong>同时移除该视频的 Difficult Sentences</strong>
+            <small>默认保留难句快照和解析；勾选后才会随视频一起删除。</small>
           </span>
         </label>
 

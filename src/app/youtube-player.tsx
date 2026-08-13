@@ -14,6 +14,7 @@ import type { YouTubeVideoId } from "@/domain/study-video";
 
 export type YouTubePlayerHandle = {
   pause: () => void;
+  playInterval: (interval: PlaybackInterval) => void;
   playFrom: (seconds: number) => void;
   setPlaybackRate: (rate: number) => void;
   setRepeatInterval: (interval: PlaybackInterval | null) => void;
@@ -69,6 +70,7 @@ export const YouTubePlayer = forwardRef<
   const positionTimerRef = useRef<number | null>(null);
   const repeatGapTimerRef = useRef<number | null>(null);
   const repeatIntervalRef = useRef<PlaybackInterval | null>(null);
+  const singlePlaybackIntervalRef = useRef<PlaybackInterval | null>(null);
   const inRepeatGapRef = useRef(false);
   const lastReportedSecondRef = useRef<number | null>(null);
   const onErrorRef = useRef(onError);
@@ -114,6 +116,14 @@ export const YouTubePlayer = forwardRef<
         if (!Number.isFinite(position) || position < 0) return;
 
         const repeatInterval = repeatIntervalRef.current;
+        const singlePlaybackInterval = singlePlaybackIntervalRef.current;
+        if (
+          singlePlaybackInterval &&
+          position >= singlePlaybackInterval.endSeconds
+        ) {
+          player.pauseVideo();
+          singlePlaybackIntervalRef.current = null;
+        }
         if (
           repeatInterval &&
           !inRepeatGapRef.current &&
@@ -208,6 +218,7 @@ export const YouTubePlayer = forwardRef<
       clearRepeatGapTimer();
       leaveRepeatGap();
       repeatIntervalRef.current = null;
+      singlePlaybackIntervalRef.current = null;
       pendingPlaybackRef.current = null;
       lastReportedSecondRef.current = null;
       playerRef.current?.destroy();
@@ -221,9 +232,23 @@ export const YouTubePlayer = forwardRef<
       pause: () => {
         playerRef.current?.pauseVideo();
       },
+      playInterval: (interval) => {
+        clearRepeatGapTimer();
+        leaveRepeatGap();
+        repeatIntervalRef.current = null;
+        singlePlaybackIntervalRef.current = interval;
+        const player = playerRef.current;
+        if (!player) {
+          pendingPlaybackRef.current = interval.startSeconds;
+          return;
+        }
+        player.seekTo(interval.startSeconds, true);
+        player.playVideo();
+      },
       playFrom: (seconds) => {
         clearRepeatGapTimer();
         leaveRepeatGap();
+        singlePlaybackIntervalRef.current = null;
         const player = playerRef.current;
         if (!player) {
           pendingPlaybackRef.current = seconds;
@@ -241,6 +266,7 @@ export const YouTubePlayer = forwardRef<
         clearRepeatGapTimer();
         leaveRepeatGap();
         repeatIntervalRef.current = interval;
+        singlePlaybackIntervalRef.current = null;
 
         if (!interval && wasInRepeatGap) {
           playerRef.current?.playVideo();

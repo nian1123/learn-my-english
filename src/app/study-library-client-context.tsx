@@ -140,7 +140,7 @@ export function ConnectivityAlert() {
       <strong>离线模式</strong>
       <span>
         可继续查看并编辑本地 Study Library、Caption Sources、Learning
-        Sentences、Local Revisions、Word Lookup 缓存和 Word Bank；YouTube
+        Sentences、Local Revisions、Difficult Sentences、Word Lookup 缓存和 Word Bank；YouTube
         播放、导入及新的词典或 AI 请求已停用。
       </span>
     </div>
