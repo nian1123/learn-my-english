@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       const result = await requestOpenAiCompatibleDifficultSentence(local, parsed.analysis, {
         callerSignal: request.signal,
         responseFormat: "json-schema",
-        timeoutMs: timeoutMs("OPENAI_TIMEOUT_MS", 15_000),
+        timeoutMs: timeoutMs("OPENAI_TIMEOUT_MS", 30_000),
       });
       return Response.json({ status: "available", mode: "local-ai", result }, { headers });
     } catch (error) {
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const result = await requestOpenAiCompatibleDifficultSentence(deepSeek, parsed.analysis, {
       callerSignal: request.signal,
       responseFormat: "json-object",
-      timeoutMs: timeoutMs("DEEPSEEK_TIMEOUT_MS", 5_000),
+      timeoutMs: timeoutMs("DEEPSEEK_TIMEOUT_MS", 15_000),
     });
     return Response.json({ status: "available", mode: "deepseek", result }, { headers });
   } catch (error) {

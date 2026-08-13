@@ -96,11 +96,24 @@ const server = createServer(async (request, response) => {
   });
 
   if (data.task === "difficult-sentence-analysis") {
+    if (body?.thinking?.type !== "disabled") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: "chatcmpl-e2e-deepseek-truncated",
+        object: "chat.completion",
+        choices: [{
+          index: 0,
+          finish_reason: "length",
+          message: { role: "assistant", content: '{"naturalMeaning":' },
+        }],
+      }));
+      return;
+    }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(completion({
-      naturalMeaning: "这是 DeepSeek 生成的整句含义。",
+      naturalMeaning: "**这是 DeepSeek 生成的整句含义。**",
       listeningSkeleton: "先抓主干，再补上下文。",
-      captureOrder: ["先抓动作"],
+      captureOrder: ["1. 先抓动作"],
       importantItems: [],
       weakForms: [],
     })));

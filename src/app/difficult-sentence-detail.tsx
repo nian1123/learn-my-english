@@ -38,6 +38,27 @@ type ImportantDraft = {
 };
 type WeakFormDraft = { start: string; text: string; reducedForm: string; listeningCue: string };
 
+function generationFailureMessage(reason: string) {
+  switch (reason) {
+    case "not-configured":
+      return "Local AI 尚未配置，DeepSeek 也不可用。请检查设置，或先手动填写解析。";
+    case "timeout":
+      return "Local AI 解析超时。可以重试，或改用已获许可的 DeepSeek。";
+    case "invalid-output":
+      return "Local AI 返回的解析不完整或未通过结构校验。可以重试，或手动填写解析。";
+    case "deepseek-timeout":
+      return "Local AI 未能完成，DeepSeek 解析也超时。请稍后重试，或手动填写解析。";
+    case "deepseek-invalid-output":
+      return "Local AI 未能完成，DeepSeek 返回的解析不完整或未通过结构校验。可以重试或手动填写。";
+    case "deepseek-provider-failure":
+      return "Local AI 未能完成，DeepSeek 当前也不可用。请检查服务状态后重试，或手动填写解析。";
+    case "deepseek-consent-required":
+      return "Local AI 当前不可用，且尚未允许使用 DeepSeek。可以重试、修改云端许可，或手动填写解析。";
+    default:
+      return "AI 服务当前未能完成解析。请检查服务状态后重试，或手动填写解析。";
+  }
+}
+
 function exactRange(source: string, text: string, requestedStart: string) {
   const needle = text.trim();
   const start = Number(requestedStart);
@@ -529,8 +550,9 @@ export function DifficultSentenceDetail({
     </div>
   ) : null;
   const generationUnavailable = generationReason && !showDeepSeekConsent ? (
-    <p role="status">
-      自动解析暂时不可用，{item.analysis ? "已保留原解析。" : "已保留 Pending analysis。"}
+    <p className="difficult-generation-status" role="status">
+      {generationFailureMessage(generationReason)}{" "}
+      {item.analysis ? "已保留原解析。" : "已保留 Pending analysis。"}
     </p>
   ) : null;
 
@@ -555,103 +577,114 @@ export function DifficultSentenceDetail({
         </nav>
       ) : null}
 
-      <section className="difficult-sentence-player" aria-label="原视频语音">
-        {networkStatus === "online" && sourceAvailable && playbackVideoId ? (
-          <YouTubePlayer
-            className="study-player"
-            initialPositionSeconds={0}
-            onPlaybackRateChange={setPlaybackRate}
-            onPlaybackRatesChange={setSupportedRates}
-            ref={playerRef}
-            videoId={playbackVideoId}
-          />
-        ) : (
-          <div className="study-player study-player-offline">当前无法播放原视频</div>
-        )}
-        <div className="difficult-playback-controls">
-          <button disabled={networkStatus !== "online" || !sourceAvailable} onClick={playSentence} type="button">播放句子</button>
-          <button disabled={networkStatus !== "online" || !sourceAvailable} onClick={() => playerRef.current?.pause()} type="button">暂停</button>
-          <button aria-pressed={looping} disabled={networkStatus !== "online" || !sourceAvailable} onClick={toggleLoop} type="button">句子循环</button>
-          {[0.75, 1].map((rate) => (
-            <button
-              aria-pressed={playbackRate === rate}
-              disabled={networkStatus !== "online" || !sourceAvailable || !supportedRates.includes(rate)}
-              key={rate}
-              onClick={() => playerRef.current?.setPlaybackRate(rate)}
-              type="button"
-            >{rate}x</button>
-          ))}
-        </div>
-      </section>
+      <div className="difficult-sentence-layout">
+        <section
+          aria-label="难句解析主要内容"
+          className="difficult-sentence-content"
+        >
+          <section className="difficult-sentence-snapshot">
+            <p>
+              <AnnotatedSentence
+                item={item}
+                onLookup={setWordLookupRequest}
+                visible={annotationsVisible}
+              />
+            </p>
+            {item.analysis &&
+            (item.analysis.importantItems.length > 0 ||
+              item.analysis.weakForms.length > 0) ? (
+              <div className="annotation-controls">
+                <span><i className="legend-important" />重点内容</span>
+                <span><i className="legend-weak" />弱读预测</span>
+                <button onClick={() => setAnnotationsVisible((value) => !value)} type="button">
+                  {annotationsVisible ? "隐藏听力标注" : "显示听力标注"}
+                </button>
+              </div>
+            ) : null}
+            <div>
+              <span>{item.origin.studyVideoTitle}</span>
+              <span>{formatMediaTime(item.snapshot.startSeconds)}–{formatMediaTime(item.snapshot.endSeconds)}</span>
+            </div>
+          </section>
 
-      <section className="difficult-sentence-snapshot">
-        <p>
-          <AnnotatedSentence
-            item={item}
-            onLookup={setWordLookupRequest}
-            visible={annotationsVisible}
-          />
-        </p>
-        {item.analysis &&
-        (item.analysis.importantItems.length > 0 ||
-          item.analysis.weakForms.length > 0) ? (
-          <div className="annotation-controls">
-            <span><i className="legend-important" />重点内容</span>
-            <span><i className="legend-weak" />弱读预测</span>
-            <button onClick={() => setAnnotationsVisible((value) => !value)} type="button">
-              {annotationsVisible ? "隐藏听力标注" : "显示听力标注"}
-            </button>
-          </div>
-        ) : null}
-        <div>
-          <span>{item.origin.studyVideoTitle}</span>
-          <span>{formatMediaTime(item.snapshot.startSeconds)}–{formatMediaTime(item.snapshot.endSeconds)}</span>
-        </div>
-      </section>
+          {editing ? (
+            <AnalysisEditor
+              item={item}
+              onCancel={() => setEditing(false)}
+              onSaved={(updated) => { setItem(updated); setEditing(false); }}
+            />
+          ) : item.analysis ? (
+            <>
+              <AnalysisView item={item} onLookup={setWordLookupRequest} />
+              <div className="difficult-analysis-actions">
+                <button onClick={() => setEditing(true)} type="button">编辑解析</button>
+                <button disabled={generating || networkStatus !== "online"} onClick={() => void generate(item, true)} type="button">{generating ? "正在生成…" : "重新生成"}</button>
+                <button onClick={() => void toggleMastery()} type="button">
+                  {item.learningState === "mastered" ? "改回 Learning" : "标记为 Mastered"}
+                </button>
+              </div>
+              {deepSeekConsentPanel}
+              {generationUnavailable}
+            </>
+          ) : (
+            <section className="pending-analysis-card" aria-labelledby="pending-title">
+              <p className="eyebrow">SAVED LOCALLY</p>
+              <h2 id="pending-title">等待难句解析</h2>
+              <p>句子快照和原视频时间范围已经保存。AI 不可用时也不会丢失，可稍后重试或手动填写。</p>
+              {deepSeekConsentPanel}
+              {generationUnavailable}
+              <button disabled={generating || networkStatus !== "online"} onClick={() => void generate(item, false)} type="button">{generating ? "正在生成…" : "重试生成"}</button>
+              <button onClick={() => setEditing(true)} type="button">手动填写解析</button>
+            </section>
+          )}
 
-      {editing ? (
-        <AnalysisEditor
-          item={item}
-          onCancel={() => setEditing(false)}
-          onSaved={(updated) => { setItem(updated); setEditing(false); }}
-        />
-      ) : item.analysis ? (
-        <>
-          <AnalysisView item={item} onLookup={setWordLookupRequest} />
-          <div className="difficult-analysis-actions">
-            <button onClick={() => setEditing(true)} type="button">编辑解析</button>
-            <button disabled={generating || networkStatus !== "online"} onClick={() => void generate(item, true)} type="button">{generating ? "正在生成…" : "重新生成"}</button>
-            <button onClick={() => void toggleMastery()} type="button">
-              {item.learningState === "mastered" ? "改回 Learning" : "标记为 Mastered"}
-            </button>
-          </div>
-          {deepSeekConsentPanel}
-          {generationUnavailable}
-        </>
-      ) : (
-        <section className="pending-analysis-card" aria-labelledby="pending-title">
-          <p className="eyebrow">SAVED LOCALLY</p>
-          <h2 id="pending-title">等待难句解析</h2>
-          <p>句子快照和原视频时间范围已经保存。AI 不可用时也不会丢失，可稍后重试或手动填写。</p>
-          {deepSeekConsentPanel}
-          {generationUnavailable}
-          <button disabled={generating || networkStatus !== "online"} onClick={() => void generate(item, false)} type="button">{generating ? "正在生成…" : "重试生成"}</button>
-          <button onClick={() => setEditing(true)} type="button">手动填写解析</button>
+          {sourceAvailabilityLoaded && sourceAvailable ? <Link
+            className="difficult-sentence-back-link"
+            href={`/study/${encodeURIComponent(item.origin.studyVideoId)}?sentenceId=${encodeURIComponent(item.snapshot.learningSentenceId)}`}
+          >返回 Study Video</Link> : sourceAvailabilityLoaded ? <p className="difficult-source-unavailable">来源 Study Video 已不在学习库，解析仍可继续使用。</p> : null}
+          <button
+            className="delete-difficult-sentence"
+            onClick={() => {
+              if (!window.confirm("删除这个 Difficult Sentence？原 Learning Sentence 不会改变。")) return;
+              void removeDifficultSentence(item.id).then(() => router.push("/difficult-sentences"));
+            }}
+            type="button"
+          >删除 Difficult Sentence</button>
         </section>
-      )}
 
-      {sourceAvailabilityLoaded && sourceAvailable ? <Link
-        className="difficult-sentence-back-link"
-        href={`/study/${encodeURIComponent(item.origin.studyVideoId)}?sentenceId=${encodeURIComponent(item.snapshot.learningSentenceId)}`}
-      >返回 Study Video</Link> : sourceAvailabilityLoaded ? <p className="difficult-source-unavailable">来源 Study Video 已不在学习库，解析仍可继续使用。</p> : null}
-      <button
-        className="delete-difficult-sentence"
-        onClick={() => {
-          if (!window.confirm("删除这个 Difficult Sentence？原 Learning Sentence 不会改变。")) return;
-          void removeDifficultSentence(item.id).then(() => router.push("/difficult-sentences"));
-        }}
-        type="button"
-      >删除 Difficult Sentence</button>
+        <aside className="difficult-sentence-player" aria-label="原视频语音">
+          <div className="difficult-player-heading">
+            <p className="eyebrow">ORIGINAL DELIVERY</p>
+            <h2>原视频语音</h2>
+          </div>
+          {networkStatus === "online" && sourceAvailable && playbackVideoId ? (
+            <YouTubePlayer
+              className="study-player"
+              initialPositionSeconds={0}
+              onPlaybackRateChange={setPlaybackRate}
+              onPlaybackRatesChange={setSupportedRates}
+              ref={playerRef}
+              videoId={playbackVideoId}
+            />
+          ) : (
+            <div className="study-player study-player-offline">当前无法播放原视频</div>
+          )}
+          <div className="difficult-playback-controls">
+            <button disabled={networkStatus !== "online" || !sourceAvailable} onClick={playSentence} type="button">播放句子</button>
+            <button disabled={networkStatus !== "online" || !sourceAvailable} onClick={() => playerRef.current?.pause()} type="button">暂停</button>
+            <button aria-pressed={looping} disabled={networkStatus !== "online" || !sourceAvailable} onClick={toggleLoop} type="button">句子循环</button>
+            {[0.75, 1].map((rate) => (
+              <button
+                aria-pressed={playbackRate === rate}
+                disabled={networkStatus !== "online" || !sourceAvailable || !supportedRates.includes(rate)}
+                key={rate}
+                onClick={() => playerRef.current?.setPlaybackRate(rate)}
+                type="button"
+              >{rate}x</button>
+            ))}
+          </div>
+        </aside>
+      </div>
       {wordLookupRequest ? (
         <WordLookupDrawer
           key={`${wordLookupRequest.sentenceId}:${wordLookupRequest.candidates[0]?.surfaceForm}`}

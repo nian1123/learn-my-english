@@ -106,37 +106,41 @@ const server = createServer(async (request, response) => {
     const importantStart = sentence.indexOf(importantText);
     const weakText = "we're";
     const weakStart = sentence.indexOf(weakText);
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify(
-        completion({
-          naturalMeaning: "今天我们在讨论练习这件事。",
-          listeningSkeleton: "we 是主语，are talking 是核心动作，about practice 补充讨论主题。",
-          captureOrder: ["先抓 talking", "再确认主题 practice"],
-          importantItems: importantStart >= 0 ? [{
-            start: importantStart,
-            end: importantStart + importantText.length,
-            text: importantText,
-            contextualMeaning: "讨论练习",
-            informationContribution: "承载本句的核心动作和主题",
-            listeningPriority: "先抓动作 talking，再补主题 practice",
-          }] : [],
-          weakForms: weakStart >= 0 ? [{
-            start: weakStart,
-            end: weakStart + weakText.length,
-            text: weakText,
-            reducedForm: "/wɪr/",
-            listeningCue: "功能成分可能快速连读，请回原视频核对",
-          }, {
-            start: sentence.indexOf("to"),
-            end: sentence.indexOf("to") + 2,
-            text: "to",
-            reducedForm: "/tə/",
-            listeningCue: "非重读时可能弱化，请回原视频核对",
-          }].filter((item) => item.start >= 0) : [],
-        }),
-      ),
-    );
+    const sendAnalysis = () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          completion({
+            naturalMeaning: "今天我们在讨论练习这件事。",
+            listeningSkeleton: "we 是主语，are talking 是核心动作，about practice 补充讨论主题。",
+            captureOrder: ["先抓 talking", "再确认主题 practice"],
+            importantItems: importantStart >= 0 ? [{
+              text: importantText,
+              occurrence: 1,
+              contextualMeaning: "讨论练习",
+              informationContribution: "承载本句的核心动作和主题",
+              listeningPriority: "先抓动作 talking，再补主题 practice",
+            }] : [],
+            weakForms: weakStart >= 0 ? [{
+              text: weakText,
+              occurrence: 1,
+              reducedForm: "/wɪr/",
+              listeningCue: "功能成分可能快速连读，请回原视频核对",
+            }, {
+              text: "to",
+              occurrence: 1,
+              reducedForm: "/tə/",
+              listeningCue: "非重读时可能弱化，请回原视频核对",
+            }].filter((item) => sentence.includes(item.text)) : [],
+          }),
+        ),
+      );
+    };
+    if (sentence.includes("slow local Difficult Sentence")) {
+      setTimeout(sendAnalysis, 15_200);
+      return;
+    }
+    sendAnalysis();
     return;
   }
 

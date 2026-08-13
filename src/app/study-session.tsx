@@ -59,6 +59,24 @@ function sentenceAtPosition(
     : undefined;
 }
 
+function EditSentenceIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="m4 20 4.4-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" />
+      <path d="m13.8 7.7 2.6 2.6" />
+    </svg>
+  );
+}
+
+function CollectDifficultSentenceIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="M6.5 4.5h11v15l-5.5-3-5.5 3v-15Z" />
+      <path d="M12 8v5M9.5 10.5h5" />
+    </svg>
+  );
+}
+
 export function StudySession({
   autoplayTarget = false,
   studyVideoId,
@@ -634,28 +652,45 @@ export function StudySession({
                     />
                     {sentence.revised ? <em>Local Revision</em> : null}
                   </div>
-                  <button
-                    aria-expanded={editingSentenceId === sentence.id}
-                    aria-label={`编辑第 ${index + 1} 句`}
-                    className="edit-sentence-button"
-                    onClick={() =>
-                      setEditingSentenceId((current) =>
-                        current === sentence.id ? null : sentence.id,
-                      )
-                    }
-                    type="button"
+                  <div
+                    aria-label={`第 ${index + 1} 句操作`}
+                    className="learning-sentence-actions"
+                    role="group"
                   >
-                    编辑
-                  </button>
-                  <button
-                    aria-label={`加入第 ${index + 1} 句到难句库`}
-                    className="collect-difficult-sentence-button"
-                    disabled={collectingSentenceId !== null}
-                    onClick={() => void collectSentence(index)}
-                    type="button"
-                  >
-                    {collectingSentenceId === sentence.id ? "正在保存…" : "加入难句"}
-                  </button>
+                    <button
+                      aria-expanded={editingSentenceId === sentence.id}
+                      aria-label={`编辑第 ${index + 1} 句`}
+                      className="sentence-row-action edit-sentence-button"
+                      onClick={() =>
+                        setEditingSentenceId((current) =>
+                          current === sentence.id ? null : sentence.id,
+                        )
+                      }
+                      title={editingSentenceId === sentence.id ? "关闭编辑" : "编辑句子"}
+                      type="button"
+                    >
+                      <EditSentenceIcon />
+                    </button>
+                    <button
+                      aria-busy={collectingSentenceId === sentence.id}
+                      aria-label={
+                        collectingSentenceId === sentence.id
+                          ? `正在保存第 ${index + 1} 句到难句库`
+                          : `加入第 ${index + 1} 句到难句库`
+                      }
+                      className={
+                        collectingSentenceId === sentence.id
+                          ? "sentence-row-action collect-difficult-sentence-button is-loading"
+                          : "sentence-row-action collect-difficult-sentence-button"
+                      }
+                      disabled={collectingSentenceId !== null}
+                      onClick={() => void collectSentence(index)}
+                      title="加入难句库"
+                      type="button"
+                    >
+                      <CollectDifficultSentenceIcon />
+                    </button>
+                  </div>
                 </div>
                 {editingSentenceId === sentence.id ? (
                   <LearningSentenceEditor

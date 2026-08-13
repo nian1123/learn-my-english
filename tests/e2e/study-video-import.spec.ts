@@ -1067,6 +1067,24 @@ test("learner collects one immutable Difficult Sentence before analysis", async 
     rootUrl: "http://127.0.0.1:3101/",
   });
 
+  const sentenceActions = page.getByRole("group", { name: "第 1 句操作" });
+  const editAction = sentenceActions.getByRole("button", { name: "编辑第 1 句" });
+  const collectAction = sentenceActions.getByRole("button", {
+    name: "加入第 1 句到难句库",
+  });
+  await expect(sentenceActions.locator("svg")).toHaveCount(2);
+  await expect(editAction).toHaveAttribute("title", "编辑句子");
+  await expect(collectAction).toHaveAttribute("title", "加入难句库");
+  await expect(editAction).toHaveText("");
+  await expect(collectAction).toHaveText("");
+  const actionBounds = await sentenceActions.boundingBox();
+  expect(actionBounds?.width).toBeLessThan(80);
+  await editAction.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "编辑第 1 句" })).toBeVisible();
+  await editAction.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "编辑第 1 句" })).toHaveCount(0);
   await page
     .getByRole("button", { name: "加入第 1 句到难句库" })
     .click();
@@ -1246,6 +1264,41 @@ test("Local AI generates meaning-driven Difficult Sentence annotations", async (
 
   await expect(page.getByText("AI analysis", { exact: true })).toBeVisible();
   await expect(page.getByText("今天我们在讨论练习这件事。", { exact: true })).toBeVisible();
+  const primaryContent = page.getByRole("region", {
+    name: "难句解析主要内容",
+  });
+  const videoPlayback = page.getByRole("complementary", {
+    name: "原视频语音",
+  });
+  await expect(primaryContent).toBeVisible();
+  await expect(videoPlayback).toBeVisible();
+  const detailLayout = await page.evaluate(() => {
+    const primary = document.querySelector<HTMLElement>(
+      ".difficult-sentence-content",
+    );
+    const video = document.querySelector<HTMLElement>(
+      ".difficult-sentence-player",
+    );
+    if (!primary || !video) return null;
+    const primaryBox = primary.getBoundingClientRect();
+    const videoBox = video.getBoundingClientRect();
+    return {
+      primaryBeforeVideo: Boolean(
+        primary.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+      primaryWidth: primaryBox.width,
+      videoWidth: videoBox.width,
+      primaryLeft: primaryBox.left,
+      videoLeft: videoBox.left,
+    };
+  });
+  expect(detailLayout).toMatchObject({ primaryBeforeVideo: true });
+  expect(detailLayout?.primaryWidth).toBeGreaterThan(detailLayout?.videoWidth ?? 0);
+  expect(detailLayout?.primaryLeft).toBeLessThan(detailLayout?.videoLeft ?? 0);
+  const playerCalls = await page.evaluate(
+    () => Reflect.get(window, "__youtubePlayerCalls") as Array<{ method: string }>,
+  );
+  expect(playerCalls.some((call) => call.method === "playVideo")).toBe(false);
   await expect(
     page
       .getByLabel("难句解析内容")
@@ -1343,6 +1396,19 @@ test("Difficult Sentence generation asks before a minimal DeepSeek fallback", as
     (item: { task?: string }) => item.task === "difficult-sentence-analysis",
   );
   expect(deepSeekRequest).toBeTruthy();
+  expect(deepSeekRequest.body.thinking).toEqual({ type: "disabled" });
+  expect(deepSeekRequest.body.temperature).toBe(0);
+  expect(deepSeekRequest.body.max_tokens).toBeGreaterThanOrEqual(1_600);
+  expect(deepSeekRequest.body.messages[0].content).toContain(
+    '"naturalMeaning"',
+  );
+  expect(deepSeekRequest.body.messages[0].content).toContain(
+    '"listeningSkeleton"',
+  );
+  expect(deepSeekRequest.body.messages[0].content).toContain('"occurrence"');
+  expect(deepSeekRequest.body.messages[0].content).toContain(
+    "Keep the entire JSON compact",
+  );
   const disclosed = JSON.stringify(deepSeekRequest.body);
   expect(disclosed).toContain("This sentence needs cloud fallback.");
   expect(disclosed).toContain("Today we're talking about practice.");
@@ -1428,7 +1494,9 @@ test("late or malformed Difficult Sentence generation never overwrites learner w
       }),
     );
     await page.getByRole("button", { name: "重新生成" }).click();
-    await expect(page.getByText("自动解析暂时不可用，已保留原解析。")).toBeVisible();
+    await expect(
+      page.getByRole("status").filter({ hasText: "已保留原解析。" }),
+    ).toContainText("AI 服务当前未能完成解析");
     await expect(page.getByText("我们慢慢重复这件事。", { exact: true })).toBeVisible();
     await page.unroute("**/api/difficult-sentence-analysis");
   }
@@ -1460,7 +1528,9 @@ test("Difficult Sentence Library preserves active results and related revisions"
   );
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "重新生成" }).click();
-  await expect(page.getByText("自动解析暂时不可用，已保留原解析。")).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "已保留原解析。" }),
+  ).toContainText("AI 服务当前未能完成解析");
   await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
   await page.unroute("**/api/difficult-sentence-analysis");
   page.once("dialog", (dialog) => dialog.accept());
@@ -2520,6 +2590,33 @@ test("default Local AI timeout accommodates a five-second cold start", async ({
     status: "available",
     mode: "local-ai",
     task: "enrich",
+  });
+});
+
+test("default Local AI timeout accommodates a slow Difficult Sentence analysis", async ({
+  request,
+}) => {
+  await request.post("http://127.0.0.1:4176/reset");
+
+  const response = await request.post(
+    "http://127.0.0.1:3105/api/difficult-sentence-analysis",
+    {
+      data: {
+        allowDeepSeekFallback: false,
+        analysis: {
+          task: "difficult-sentence-analysis",
+          sentence: "This slow local Difficult Sentence still needs a complete analysis.",
+          interval: { startSeconds: 4, endSeconds: 9 },
+        },
+      },
+      timeout: 25_000,
+    },
+  );
+
+  expect(response.status()).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    status: "available",
+    mode: "local-ai",
   });
 });
 
