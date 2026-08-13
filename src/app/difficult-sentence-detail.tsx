@@ -17,6 +17,7 @@ import type {
   DifficultSentence,
   DifficultSentenceId,
 } from "@/domain/difficult-sentence";
+import type { YouTubeVideoId } from "@/domain/study-video";
 import { formatMediaTime } from "@/domain/time";
 import { createWordLookupRequest, type WordLookupRequest } from "@/domain/word-lookup";
 
@@ -29,18 +30,24 @@ import { WordLookupDrawer } from "./word-lookup-drawer";
 import { difficultSentenceMatches, type DifficultSentenceFilter } from "./difficult-sentence-library";
 
 type ImportantDraft = {
+  start: string;
   text: string;
   contextualMeaning: string;
   informationContribution: string;
   listeningPriority: string;
 };
-type WeakFormDraft = { text: string; reducedForm: string; listeningCue: string };
+type WeakFormDraft = { start: string; text: string; reducedForm: string; listeningCue: string };
 
-function exactRange(source: string, text: string) {
+function exactRange(source: string, text: string, requestedStart: string) {
   const needle = text.trim();
-  const start = source.indexOf(needle);
-  if (!needle || start < 0 || source.indexOf(needle, start + 1) >= 0) {
-    throw new Error(`引用原文“${needle || "空内容"}”必须在句子中精确出现一次`);
+  const start = Number(requestedStart);
+  if (
+    !needle ||
+    !Number.isInteger(start) ||
+    start < 0 ||
+    source.slice(start, start + needle.length) !== needle
+  ) {
+    throw new Error(`请为原文“${needle || "空内容"}”填写正确的起始字符位置`);
   }
   return { start, end: start + needle.length, text: needle };
 }
@@ -125,6 +132,7 @@ function AnalysisEditor({
   );
   const [importantItems, setImportantItems] = useState<ImportantDraft[]>(
     item.analysis?.importantItems.map((entry) => ({
+      start: String(entry.start),
       text: entry.text,
       contextualMeaning: entry.contextualMeaning,
       informationContribution: entry.informationContribution,
@@ -133,6 +141,7 @@ function AnalysisEditor({
   );
   const [weakForms, setWeakForms] = useState<WeakFormDraft[]>(
     item.analysis?.weakForms.map((entry) => ({
+      start: String(entry.start),
       text: entry.text,
       reducedForm: entry.reducedForm,
       listeningCue: entry.listeningCue,
@@ -155,13 +164,13 @@ function AnalysisEditor({
             .map((line) => line.trim())
             .filter(Boolean),
           importantItems: importantItems.map((entry) => ({
-            ...exactRange(item.snapshot.text, entry.text),
+            ...exactRange(item.snapshot.text, entry.text, entry.start),
             contextualMeaning: entry.contextualMeaning,
             informationContribution: entry.informationContribution,
             listeningPriority: entry.listeningPriority,
           })),
           weakForms: weakForms.map((entry) => ({
-            ...exactRange(item.snapshot.text, entry.text),
+            ...exactRange(item.snapshot.text, entry.text, entry.start),
             reducedForm: entry.reducedForm,
             listeningCue: entry.listeningCue,
           })),
@@ -188,26 +197,28 @@ function AnalysisEditor({
         <legend>重点内容（按句意添加，不限数量，可为空）</legend>
         {importantItems.map((entry, index) => (
           <div className="analysis-item-editor" key={index}>
-            <label><span>原句中的词或短语</span><input aria-label={`重点原文 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setImportantItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: value } : item)); }} required value={entry.text} /></label>
+            <label><span>原句中的词或短语</span><input aria-label={`重点原文 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; const start = item.snapshot.text.indexOf(value.trim()); setImportantItems((items) => items.map((draft, itemIndex) => itemIndex === index ? { ...draft, text: value, start: start >= 0 ? String(start) : "" } : draft)); }} required value={entry.text} /></label>
+            <label><span>起始字符位置</span><input aria-label={`重点起始位置 ${index + 1}`} min="0" onChange={(event) => { const value = event.currentTarget.value; setImportantItems((items) => items.map((draft, itemIndex) => itemIndex === index ? { ...draft, start: value } : draft)); }} required type="number" value={entry.start} /></label>
             <label><span>语境含义</span><input aria-label={`语境含义 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setImportantItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, contextualMeaning: value } : item)); }} required value={entry.contextualMeaning} /></label>
             <label><span>信息作用</span><input aria-label={`信息作用 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setImportantItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, informationContribution: value } : item)); }} required value={entry.informationContribution} /></label>
             <label><span>听力优先级</span><input aria-label={`听力优先级 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setImportantItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, listeningPriority: value } : item)); }} required value={entry.listeningPriority} /></label>
             <button aria-label={`删除重点内容 ${index + 1}`} onClick={() => setImportantItems((items) => items.filter((_, itemIndex) => itemIndex !== index))} type="button">删除</button>
           </div>
         ))}
-        <button onClick={() => setImportantItems((items) => [...items, { text: "", contextualMeaning: "", informationContribution: "", listeningPriority: "" }])} type="button">添加重点内容</button>
+        <button onClick={() => setImportantItems((items) => [...items, { start: "", text: "", contextualMeaning: "", informationContribution: "", listeningPriority: "" }])} type="button">添加重点内容</button>
       </fieldset>
       <fieldset>
         <legend>弱读预测（文本推测，可为空）</legend>
         {weakForms.map((entry, index) => (
           <div className="analysis-item-editor" key={index}>
-            <label><span>原句中的功能词</span><input aria-label={`弱读原文 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setWeakForms((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: value } : item)); }} required value={entry.text} /></label>
+            <label><span>原句中的功能词</span><input aria-label={`弱读原文 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; const start = item.snapshot.text.indexOf(value.trim()); setWeakForms((items) => items.map((draft, itemIndex) => itemIndex === index ? { ...draft, text: value, start: start >= 0 ? String(start) : "" } : draft)); }} required value={entry.text} /></label>
+            <label><span>起始字符位置</span><input aria-label={`弱读起始位置 ${index + 1}`} min="0" onChange={(event) => { const value = event.currentTarget.value; setWeakForms((items) => items.map((draft, itemIndex) => itemIndex === index ? { ...draft, start: value } : draft)); }} required type="number" value={entry.start} /></label>
             <label><span>可能读音</span><input aria-label={`可能读音 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setWeakForms((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, reducedForm: value } : item)); }} required value={entry.reducedForm} /></label>
             <label><span>听力提示</span><input aria-label={`弱读听力提示 ${index + 1}`} onChange={(event) => { const value = event.currentTarget.value; setWeakForms((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, listeningCue: value } : item)); }} required value={entry.listeningCue} /></label>
             <button aria-label={`删除弱读预测 ${index + 1}`} onClick={() => setWeakForms((items) => items.filter((_, itemIndex) => itemIndex !== index))} type="button">删除</button>
           </div>
         ))}
-        <button onClick={() => setWeakForms((items) => [...items, { text: "", reducedForm: "", listeningCue: "" }])} type="button">添加弱读预测</button>
+        <button onClick={() => setWeakForms((items) => [...items, { start: "", text: "", reducedForm: "", listeningCue: "" }])} type="button">添加弱读预测</button>
       </fieldset>
       <label>
         <span>实用听力结构</span>
@@ -337,6 +348,7 @@ export function DifficultSentenceDetail({
     useState<WordLookupRequest | null>(null);
   const [sourceAvailable, setSourceAvailable] = useState(false);
   const [sourceAvailabilityLoaded, setSourceAvailabilityLoaded] = useState(false);
+  const [playbackVideoId, setPlaybackVideoId] = useState<YouTubeVideoId | undefined>();
   const [generationReason, setGenerationReason] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [resultItems, setResultItems] = useState<DifficultSentence[]>([]);
@@ -348,6 +360,7 @@ export function DifficultSentenceDetail({
     setItem(null);
     setSourceAvailable(false);
     setSourceAvailabilityLoaded(false);
+    setPlaybackVideoId(undefined);
     readDifficultSentence(difficultSentenceId)
       .then((stored) => {
         if (!active) return;
@@ -356,6 +369,7 @@ export function DifficultSentenceDetail({
           void readStudyVideo(stored.origin.studyVideoId).then((video) => {
             if (active) {
               setSourceAvailable(Boolean(video));
+              setPlaybackVideoId(video?.youtubeVideoId);
               setSourceAvailabilityLoaded(true);
             }
           }).catch(() => {
@@ -398,7 +412,7 @@ export function DifficultSentenceDetail({
       );
       if (response.status === "available") {
         const updated = await readDifficultSentence(current.id);
-        if (updated) setItem(updated);
+        if (updated && current.id === difficultSentenceId) setItem(updated);
       } else {
         setGenerationReason(response.reason);
       }
@@ -542,14 +556,14 @@ export function DifficultSentenceDetail({
       ) : null}
 
       <section className="difficult-sentence-player" aria-label="原视频语音">
-        {networkStatus === "online" && sourceAvailable ? (
+        {networkStatus === "online" && sourceAvailable && playbackVideoId ? (
           <YouTubePlayer
             className="study-player"
             initialPositionSeconds={0}
             onPlaybackRateChange={setPlaybackRate}
             onPlaybackRatesChange={setSupportedRates}
             ref={playerRef}
-            videoId={item.origin.youtubeVideoId}
+            videoId={playbackVideoId}
           />
         ) : (
           <div className="study-player study-player-offline">当前无法播放原视频</div>

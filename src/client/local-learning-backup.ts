@@ -604,6 +604,25 @@ function migrateLegacyBackup(value: unknown): LocalLearningBackup | null {
   return isLocalLearningBackup(migrated) ? migrated : null;
 }
 
+function difficultSentenceOriginsAreConsistent(
+  backup: LocalLearningBackup,
+) {
+  const studyVideos = new Map(
+    backup.data.studyLibrary.map((studyVideo) => [studyVideo.id, studyVideo]),
+  );
+  return backup.data.difficultSentences.every((item) => {
+    const studyVideo = studyVideos.get(item.origin.studyVideoId);
+    return (
+      !studyVideo ||
+      (item.origin.youtubeVideoId === studyVideo.youtubeVideoId &&
+        item.origin.studyVideoTitle === studyVideo.title &&
+        item.origin.studyVideoChannel === studyVideo.channel &&
+        item.origin.studyVideoThumbnailUrl === studyVideo.thumbnailUrl &&
+        item.snapshot.endSeconds <= studyVideo.durationSeconds)
+    );
+  });
+}
+
 export function parseLocalLearningBackupText(
   text: string,
 ): LocalLearningBackupParseResult {
@@ -616,7 +635,7 @@ export function parseLocalLearningBackupText(
   } catch {
     return { status: "invalid", reason: "invalid-json" };
   }
-  if (isLocalLearningBackup(parsed)) {
+  if (isLocalLearningBackup(parsed) && difficultSentenceOriginsAreConsistent(parsed)) {
     return { status: "valid", backup: parsed };
   }
   const migrated = migrateLegacyBackup(parsed);
@@ -770,6 +789,9 @@ export async function restoreLocalLearningBackup(
   mode: LocalLearningRestoreMode,
 ): Promise<void> {
   if (!isLocalLearningBackup(backup)) {
+    throw new LocalLearningBackupValidationError();
+  }
+  if (!difficultSentenceOriginsAreConsistent(backup)) {
     throw new LocalLearningBackupValidationError();
   }
   const database = await openLearningDatabase();

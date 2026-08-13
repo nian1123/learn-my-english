@@ -148,6 +148,62 @@ export async function updateDifficultSentence(
   }
 }
 
+async function compareAndSetDifficultSentenceAnalysis({
+  analysis,
+  expected,
+  id,
+  mode,
+}: {
+  analysis: unknown;
+  expected: DifficultSentence;
+  id: DifficultSentenceId;
+  mode: "initial" | "replacement";
+}): Promise<{ applied: boolean; item: DifficultSentence | null }> {
+  const database = await openLearningDatabase();
+  try {
+    const transaction = database.transaction(
+      LEARNING_STORES.difficultSentences,
+      "readwrite",
+    );
+    const store = transaction.objectStore(LEARNING_STORES.difficultSentences);
+    const stored = await requestResult(store.get(id));
+    if (!isDifficultSentence(stored)) {
+      await transactionCompleted(transaction);
+      return { applied: false, item: null };
+    }
+    const eligible =
+      mode === "initial"
+        ? !stored.analysis
+        : Boolean(stored.analysis) &&
+          Boolean(expected.analysis) &&
+          stored.provenance === expected.provenance &&
+          JSON.stringify(stored.analysis) === JSON.stringify(expected.analysis);
+    if (!eligible) {
+      await transactionCompleted(transaction);
+      return { applied: false, item: stored };
+    }
+    const parsed = parseDifficultSentenceAnalysis(analysis, stored.snapshot.text);
+    if (!parsed) {
+      transaction.abort();
+      throw new Error("难句解析内容不完整或引用范围无效");
+    }
+    const updated: DifficultSentence = {
+      ...stored,
+      generationStatus: "complete",
+      analysis: parsed,
+      provenance: "ai",
+      learningState: stored.learningState ?? "learning",
+      updatedAt: new Date().toISOString(),
+    };
+    store.put(updated, id);
+    await transactionCompleted(transaction);
+    announceLocalLearningDataChanged();
+    return { applied: true, item: updated };
+  } finally {
+    database.close();
+  }
+}
+
 export async function removeDifficultSentence(
   id: DifficultSentenceId,
 ): Promise<void> {
@@ -189,6 +245,40 @@ export async function completeDifficultSentenceAnalysis({
       learningState: item.learningState ?? "learning",
       updatedAt: new Date().toISOString(),
     };
+  });
+}
+
+export async function completePendingDifficultSentenceAnalysis({
+  analysis,
+  expected,
+  id,
+}: {
+  analysis: unknown;
+  expected: DifficultSentence;
+  id: DifficultSentenceId;
+}) {
+  return compareAndSetDifficultSentenceAnalysis({
+    analysis,
+    expected,
+    id,
+    mode: "initial",
+  });
+}
+
+export async function replaceDifficultSentenceAnalysis({
+  analysis,
+  expected,
+  id,
+}: {
+  analysis: unknown;
+  expected: DifficultSentence;
+  id: DifficultSentenceId;
+}) {
+  return compareAndSetDifficultSentenceAnalysis({
+    analysis,
+    expected,
+    id,
+    mode: "replacement",
   });
 }
 

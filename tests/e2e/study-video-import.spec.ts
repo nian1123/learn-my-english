@@ -1131,6 +1131,60 @@ test("learner manually completes a Difficult Sentence and plays its exact interv
       { method: "seekTo", seconds: 1 },
       { method: "playVideo" },
     ]);
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(3.5));
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("button", { name: "0.75x" }).click();
+  await page.getByRole("button", { name: "1x" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "setPlaybackRate", seconds: 0.75 },
+      { method: "setPlaybackRate", seconds: 1 },
+    ]);
+  await page.evaluate(() =>
+    Reflect.get(window, "__youtubePlayerCalls").splice(0),
+  );
+  await page.getByRole("button", { name: "句子循环" }).click();
+  await page.getByRole("button", { name: "播放句子" }).click();
+  await page.evaluate(() => Reflect.get(window, "__setYouTubeCurrentTime")(3.5));
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
+  await page.waitForTimeout(3_200);
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+    ]);
+  await page.getByRole("button", { name: "句子循环" }).click();
+  await page.getByRole("button", { name: "暂停" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")))
+    .toEqual([
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+      { method: "seekTo", seconds: 1 },
+      { method: "playVideo" },
+      { method: "pauseVideo" },
+    ]);
 
   await page.getByRole("button", { name: "手动填写解析" }).click();
   await page.getByLabel("整句中文含义").fill("欢迎来到节目。 ");
@@ -1149,6 +1203,11 @@ test("learner manually completes a Difficult Sentence and plays its exact interv
   await page.getByLabel("弱读原文 1").fill("to");
   await page.getByLabel("可能读音 1").fill("/tə/");
   await page.getByLabel("弱读听力提示 1").fill("非重读时可能弱化");
+  await page.getByRole("button", { name: "添加重点内容" }).click();
+  await page.getByLabel("重点原文 2").fill("the show");
+  await page.getByLabel("语境含义 2").fill("节目");
+  await page.getByLabel("信息作用 2").fill("补充欢迎的场景");
+  await page.getByLabel("听力优先级 2").fill("动作后再确认场景");
   await page.getByRole("button", { name: "保存手动解析" }).click();
 
   await expect(page.getByText("Learning", { exact: true })).toBeVisible();
@@ -1202,6 +1261,31 @@ test("Local AI generates meaning-driven Difficult Sentence annotations", async (
   );
   await page.getByRole("button", { name: "隐藏听力标注" }).click();
   await expect(page.locator("mark[data-annotation]")).toHaveCount(0);
+
+  await page.route("**/api/difficult-sentence-analysis", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.fulfill({
+      contentType: "application/json",
+      status: 200,
+      body: JSON.stringify({
+        status: "available",
+        mode: "local-ai",
+        result: {
+          naturalMeaning: "这是重新生成后的含义。",
+          listeningSkeleton: "先抓重生后的听力骨架。",
+          captureOrder: ["先抓新的核心表达"],
+          importantItems: [],
+          weakForms: [],
+        },
+      }),
+    });
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await page.getByRole("button", { name: "标记为 Mastered" }).click();
+  await expect(page.getByText("这是重新生成后的含义。", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mastered", { exact: true })).toBeVisible();
+  await page.unroute("**/api/difficult-sentence-analysis");
 
   const providerRequests = await request
     .get("http://127.0.0.1:4176/requests")
@@ -1264,6 +1348,90 @@ test("Difficult Sentence generation asks before a minimal DeepSeek fallback", as
   expect(disclosed).toContain("Today we're talking about practice.");
   expect(disclosed).not.toContain("wordBank");
   expect(disclosed).not.toContain("captionSource");
+});
+
+test("late or malformed Difficult Sentence generation never overwrites learner work", async ({
+  page,
+}) => {
+  await installYouTubePlayerBoundary(page, { duration: 74 });
+  await submitStudyVideoImport(page);
+  await page.getByRole("button", { name: "编辑第 1 句" }).click();
+  const editor = page.getByRole("region", { name: "编辑第 1 句" });
+  await editor.getByLabel("句子文本").fill("We repeat and repeat this slowly.");
+  await editor.getByRole("button", { name: "保存修订" }).click();
+
+  await page.route("**/api/difficult-sentence-analysis", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({
+      contentType: "application/json",
+      status: 200,
+      body: JSON.stringify({
+        status: "available",
+        mode: "local-ai",
+        result: {
+          naturalMeaning: "迟到的 AI 内容。",
+          listeningSkeleton: "迟到的 AI 结构。",
+          captureOrder: ["迟到的步骤"],
+          importantItems: [],
+          weakForms: [],
+        },
+      }),
+    });
+  });
+  await page
+    .getByRole("button", { name: "加入第 1 句到难句库" })
+    .click();
+  await page.getByRole("button", { name: "手动填写解析" }).click();
+  await page.getByLabel("整句中文含义").fill("我们慢慢重复这件事。");
+  await page.getByLabel("实用听力结构").fill("先抓 repeat，再确认重复动作。");
+  await page.getByLabel("听力捕捉顺序").fill("先抓第一个 repeat");
+  await page.getByRole("button", { name: "添加重点内容" }).click();
+  await page.getByLabel("重点原文 1").fill("repeat");
+  await page.getByLabel("重点起始位置 1").fill("14");
+  await page.getByLabel("语境含义 1").fill("再次重复");
+  await page.getByLabel("信息作用 1").fill("强调动作反复发生");
+  await page.getByLabel("听力优先级 1").fill("确认第二次出现");
+  await page.getByRole("button", { name: "保存手动解析" }).click();
+  await expect(page.getByText("Manual analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("我们慢慢重复这件事。", { exact: true })).toBeVisible();
+  await expect(page.getByText("迟到的 AI 内容。", { exact: true })).toHaveCount(0);
+  await page.waitForTimeout(1_600);
+  await expect(page.getByText("Manual analysis", { exact: true })).toBeVisible();
+  await expect(page.getByText("我们慢慢重复这件事。", { exact: true })).toBeVisible();
+  await expect(page.getByText("迟到的 AI 内容。", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Difficult Sentence 解析已完成")).toHaveCount(0);
+  await page.unroute("**/api/difficult-sentence-analysis");
+
+  for (const invalidNaturalMeaning of [
+    "\t制表符缩进代码",
+    "     缩进代码",
+    "*跨行\n强调*",
+    "硬换行  \n下一行",
+    "<![CDATA[HTML 内容]]>",
+  ]) {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.route("**/api/difficult-sentence-analysis", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        status: 200,
+        body: JSON.stringify({
+          status: "available",
+          mode: "local-ai",
+          result: {
+            naturalMeaning: invalidNaturalMeaning,
+            listeningSkeleton: "仍不应保存",
+            captureOrder: ["无效结果"],
+            importantItems: [],
+            weakForms: [],
+          },
+        }),
+      }),
+    );
+    await page.getByRole("button", { name: "重新生成" }).click();
+    await expect(page.getByText("自动解析暂时不可用，已保留原解析。")).toBeVisible();
+    await expect(page.getByText("我们慢慢重复这件事。", { exact: true })).toBeVisible();
+    await page.unroute("**/api/difficult-sentence-analysis");
+  }
 });
 
 test("Difficult Sentence Library preserves active results and related revisions", async ({
@@ -1332,6 +1500,34 @@ test("Difficult Sentence Library preserves active results and related revisions"
       page.evaluate(() => Reflect.get(window, "__youtubePlayerCalls")),
     )
     .toEqual([]);
+
+  await page.route("**/api/difficult-sentence-analysis", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.fulfill({
+      contentType: "application/json",
+      status: 200,
+      body: JSON.stringify({
+        status: "available",
+        mode: "local-ai",
+        result: {
+          naturalMeaning: "跨页面完成的解析。",
+          listeningSkeleton: "只应更新它自己的记录。",
+          captureOrder: ["保持当前页面身份"],
+          importantItems: [],
+          weakForms: [],
+        },
+      }),
+    });
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await page.getByRole("link", { name: "下一句" }).click();
+  await expect(page.getByText("Welcome to the show.", { exact: true })).toBeVisible();
+  await page.waitForTimeout(900);
+  await expect(page.getByText("Welcome to the show.", { exact: true })).toBeVisible();
+  await expect(page.getByText("跨页面完成的解析。", { exact: true })).toHaveCount(0);
+  await page.unroute("**/api/difficult-sentence-analysis");
+  await page.getByRole("link", { name: "上一句" }).click();
 
   await page.getByRole("link", { name: "返回 Study Video" }).click();
   await page.getByRole("button", { name: "编辑第 2 句" }).click();
@@ -3130,6 +3326,18 @@ test("versioned backup safely round-trips all local learning data", async ({
     name: "malformed-difficult-sentence-backup.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(malformedDifficultSentenceBackup)),
+  });
+  await expect(
+    page.getByRole("alert").filter({ hasText: "备份结构无效" }),
+  ).toBeVisible();
+
+  const mismatchedDifficultSentenceOrigin = structuredClone(backup);
+  mismatchedDifficultSentenceOrigin.data.difficultSentences[0].origin.youtubeVideoId =
+    "mismatch001";
+  await backupInput.setInputFiles({
+    name: "mismatched-difficult-sentence-origin.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(mismatchedDifficultSentenceOrigin)),
   });
   await expect(
     page.getByRole("alert").filter({ hasText: "备份结构无效" }),

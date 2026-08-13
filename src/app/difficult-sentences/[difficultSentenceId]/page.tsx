@@ -24,6 +24,7 @@ export default async function DifficultSentencePage({
   return (
     <DifficultSentenceDetail
       difficultSentenceId={difficultSentenceId}
+      key={difficultSentenceId}
       initialFilter={
         typeof query.status === "string" &&
         ["all", "pending", "learning", "mastered"].includes(query.status)

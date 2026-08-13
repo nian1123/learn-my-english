@@ -4,7 +4,10 @@ import {
   type DifficultSentenceAnalysisResponse,
 } from "@/domain/difficult-sentence-ai";
 import type { DifficultSentence } from "@/domain/difficult-sentence";
-import { completeDifficultSentenceAnalysis } from "./difficult-sentence-library";
+import {
+  completePendingDifficultSentenceAnalysis,
+  replaceDifficultSentenceAnalysis,
+} from "./difficult-sentence-library";
 
 export async function requestDifficultSentenceAnalysis(
   analysis: DifficultSentenceAnalysisRequest,
@@ -63,16 +66,24 @@ export function generateDifficultSentenceAnalysis(
   )
     .then(async (response) => {
       if (response.status === "available") {
-        await completeDifficultSentenceAnalysis({
-          analysis: response.result,
-          id: difficultSentence.id,
-          provenance: "ai",
-        });
-        window.dispatchEvent(
-          new CustomEvent("learn-my-english:difficult-sentence-analysis-complete", {
-            detail: { difficultSentenceId: difficultSentence.id },
-          }),
-        );
+        const updated = difficultSentence.analysis
+          ? await replaceDifficultSentenceAnalysis({
+              analysis: response.result,
+              expected: difficultSentence,
+              id: difficultSentence.id,
+            })
+          : await completePendingDifficultSentenceAnalysis({
+              analysis: response.result,
+              expected: difficultSentence,
+              id: difficultSentence.id,
+            });
+        if (updated.applied) {
+          window.dispatchEvent(
+            new CustomEvent("learn-my-english:difficult-sentence-analysis-complete", {
+              detail: { difficultSentenceId: difficultSentence.id },
+            }),
+          );
+        }
       }
       return response;
     })

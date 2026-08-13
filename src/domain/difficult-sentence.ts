@@ -6,6 +6,7 @@ import type {
   StudyVideoId,
   YouTubeVideoId,
 } from "./study-video";
+import { isStudyVideoId } from "./study-video";
 
 declare const difficultSentenceIdBrand: unique symbol;
 
@@ -95,6 +96,44 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
 }
 
+function isPlainStructuredText(value: unknown): value is string {
+  return (
+    isNonEmptyString(value) &&
+    !/[\t\r\n`*_~<>]/.test(value) &&
+    !/^\s{0,3}(?:#{1,6}(?:\s|$)|[-+]\s|>\s|\d+[.)]\s)/.test(value) &&
+    !/^\s{0,3}(?:-{3,}|={3,})\s*$/.test(value) &&
+    !/^ {4,}\S/.test(value) &&
+    !/!?\[[^\]]+\](?:\([^\)]+\)|\[[^\]]*\])/.test(value) &&
+    !/^\s{0,3}\[[^\]]+\]:\s+\S+/.test(value)
+  );
+}
+
+function isYouTubeVideoId(value: unknown): value is YouTubeVideoId {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{11}$/.test(value);
+}
+
+function isLearningSentenceId(value: unknown): value is LearningSentenceId {
+  return typeof value === "string" && /^sentence-\d+(?:-local-\d+)*$/.test(value);
+}
+
+function isCaptionCueId(value: unknown) {
+  return typeof value === "string" && /^cue-\d+$/.test(value);
+}
+
+function isRemoteUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isIsoDate(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -153,11 +192,11 @@ export function parseDifficultSentenceAnalysis(
       "importantItems",
       "weakForms",
     ]) ||
-    !isNonEmptyString(value.naturalMeaning) ||
-    !isNonEmptyString(value.listeningSkeleton) ||
+    !isPlainStructuredText(value.naturalMeaning) ||
+    !isPlainStructuredText(value.listeningSkeleton) ||
     !Array.isArray(value.captureOrder) ||
     value.captureOrder.length === 0 ||
-    !value.captureOrder.every(isNonEmptyString) ||
+    !value.captureOrder.every(isPlainStructuredText) ||
     !Array.isArray(value.importantItems) ||
     !Array.isArray(value.weakForms)
   ) {
@@ -174,9 +213,9 @@ export function parseDifficultSentenceAnalysis(
     if (
       !range ||
       !isRecord(candidate) ||
-      !isNonEmptyString(candidate.contextualMeaning) ||
-      !isNonEmptyString(candidate.informationContribution) ||
-      !isNonEmptyString(candidate.listeningPriority)
+      !isPlainStructuredText(candidate.contextualMeaning) ||
+      !isPlainStructuredText(candidate.informationContribution) ||
+      !isPlainStructuredText(candidate.listeningPriority)
     ) {
       return null;
     }
@@ -197,8 +236,8 @@ export function parseDifficultSentenceAnalysis(
     if (
       !range ||
       !isRecord(candidate) ||
-      !isNonEmptyString(candidate.reducedForm) ||
-      !isNonEmptyString(candidate.listeningCue)
+      !isPlainStructuredText(candidate.reducedForm) ||
+      !isPlainStructuredText(candidate.listeningCue)
     ) {
       return null;
     }
@@ -273,14 +312,14 @@ export function isDifficultSentence(value: unknown): value is DifficultSentence 
         ? []
         : ["nextSentenceText"]),
     ]) &&
-    isNonEmptyString(snapshot?.learningSentenceId) &&
-    isNonEmptyString(snapshot?.captionSourceId) &&
+    isLearningSentenceId(snapshot?.learningSentenceId) &&
+    typeof snapshot?.captionSourceId === "string" &&
     Array.isArray(snapshot?.sourceCueIds) &&
     snapshot.sourceCueIds.length > 0 &&
-    snapshot.sourceCueIds.every(isNonEmptyString) &&
+    snapshot.sourceCueIds.every(isCaptionCueId) &&
     Array.isArray(snapshot?.originalSentenceIds) &&
     snapshot.originalSentenceIds.length > 0 &&
-    snapshot.originalSentenceIds.every(isNonEmptyString) &&
+    snapshot.originalSentenceIds.every(isLearningSentenceId) &&
     isNonEmptyString(snapshot?.text) &&
     typeof snapshot?.startSeconds === "number" &&
     Number.isFinite(snapshot.startSeconds) &&
@@ -301,11 +340,14 @@ export function isDifficultSentence(value: unknown): value is DifficultSentence 
       "studyVideoChannel",
       "studyVideoThumbnailUrl",
     ]) &&
-    isNonEmptyString(origin?.studyVideoId) &&
-    isNonEmptyString(origin?.youtubeVideoId) &&
+    typeof origin?.studyVideoId === "string" &&
+    isStudyVideoId(origin.studyVideoId) &&
+    isYouTubeVideoId(origin?.youtubeVideoId) &&
+    origin.studyVideoId === `study-video-${origin.youtubeVideoId}` &&
     isNonEmptyString(origin?.studyVideoTitle) &&
     isNonEmptyString(origin?.studyVideoChannel) &&
-    typeof origin?.studyVideoThumbnailUrl === "string" &&
+    isRemoteUrl(origin?.studyVideoThumbnailUrl) &&
+    snapshot.captionSourceId === `caption-${origin.youtubeVideoId}` &&
     (candidate.generationStatus === "pending"
       ? candidate.analysis === undefined &&
         candidate.provenance === undefined &&
