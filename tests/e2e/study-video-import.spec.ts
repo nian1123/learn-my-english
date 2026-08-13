@@ -1718,6 +1718,58 @@ test("a near-three-hour Caption Source renders only a responsive window", async 
   expect(await page.locator(".learning-sentence-item").count()).toBeLessThan(80);
 });
 
+test("manual Learning Sentence scrolling is not pulled back by playback progress", async ({
+  page,
+}) => {
+  const durationSeconds = 1_800;
+  const sentenceCount = 240;
+  await installYouTubePlayerBoundary(page, { duration: durationSeconds });
+  await submitStudyVideoImport(page, {
+    contents: representativeCaptionSource(sentenceCount, durationSeconds),
+    fileName: "manual-scroll-interview.vtt",
+  });
+
+  const virtualizedList = page.locator(".virtualized-sentence-viewport");
+  await expect(virtualizedList).toBeVisible();
+  await activeSentenceLatency(page, 161, 1_200.2);
+  const followedScrollTop = await virtualizedList.evaluate(
+    (element) => element.scrollTop,
+  );
+
+  const manuallyChosenScrollTop = await virtualizedList.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -600,
+    }));
+    element.scrollTop = element.scrollHeight * (14 / 30);
+    element.dispatchEvent(new Event("scroll"));
+    return element.scrollTop;
+  });
+  expect(manuallyChosenScrollTop).toBeLessThan(followedScrollTop);
+  await page.waitForTimeout(100);
+
+  await page.evaluate(() => {
+    const changed = Reflect.get(window, "__setYouTubeCurrentTime")(1_207.7);
+    if (!changed) throw new Error("测试播放器尚未就绪");
+  });
+  await page.waitForTimeout(500);
+  const scrollTopAfterPlaybackProgress = await virtualizedList.evaluate(
+    (element) => element.scrollTop,
+  );
+  expect(scrollTopAfterPlaybackProgress).toBeCloseTo(manuallyChosenScrollTop, 0);
+
+  await page.getByRole("button", { name: /下一句/ }).click();
+  await expect(
+    page.getByText("Performance sentence 163.", { exact: true }),
+  ).toBeVisible();
+  const scrollTopAfterExplicitNavigation = await virtualizedList.evaluate(
+    (element) => element.scrollTop,
+  );
+  expect(scrollTopAfterExplicitNavigation).toBeGreaterThan(
+    manuallyChosenScrollTop + 1_000,
+  );
+});
+
 test("normal playback and sentence controls move naturally through the transcript", async ({
   page,
 }) => {

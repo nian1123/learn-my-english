@@ -94,6 +94,7 @@ export function StudySession({
   const [loadFailed, setLoadFailed] = useState(false);
   const [activeSentenceId, setActiveSentenceId] =
     useState<LearningSentenceId | null>(null);
+  const [followActiveSentence, setFollowActiveSentence] = useState(true);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [repeatSentenceId, setRepeatSentenceId] =
     useState<LearningSentenceId | null>(null);
@@ -207,9 +208,9 @@ export function StudySession({
   }, [networkStatus]);
 
   useEffect(() => {
-    if (!activeSentenceId) return;
+    if (!activeSentenceId || !followActiveSentence) return;
     activeSentenceRef.current?.scrollIntoView({ block: "nearest" });
-  }, [activeSentenceId]);
+  }, [activeSentenceId, followActiveSentence]);
 
   useEffect(() => {
     if (
@@ -300,6 +301,7 @@ export function StudySession({
 
   const playSentence = (sentence: LearningSentence) => {
     if (!networkAvailable) return;
+    setFollowActiveSentence(true);
     selectedSentenceIdRef.current = sentence.id;
     setActiveSentenceId(sentence.id);
     if (repeatSentenceId) {
@@ -325,6 +327,7 @@ export function StudySession({
   };
   const toggleRepeat = () => {
     if (!networkAvailable) return;
+    setFollowActiveSentence(true);
     if (repeatSentenceId) {
       setRepeatSentenceId(null);
       playerRef.current?.setRepeatInterval(null);
@@ -615,7 +618,9 @@ export function StudySession({
                 ? "sentence-list transcript-hidden"
                 : "sentence-list"
             }
+            followActive={followActiveSentence}
             items={learningSentences}
+            onManualScroll={() => setFollowActiveSentence(false)}
             renderItem={(sentence, index) => (
               <>
                 <div className="learning-sentence-row">

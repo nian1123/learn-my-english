@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -19,7 +20,9 @@ type IdentifiedItem = { id: string };
 type VirtualizedLearningSentenceListProps<Item extends IdentifiedItem> = {
   activeIndex: number;
   className: string;
+  followActive: boolean;
   items: readonly Item[];
+  onManualScroll: () => void;
   renderItem: (item: Item, index: number) => ReactNode;
 };
 
@@ -84,7 +87,9 @@ export function VirtualizedLearningSentenceList<
 >({
   activeIndex,
   className,
+  followActive,
   items,
+  onManualScroll,
   renderItem,
 }: VirtualizedLearningSentenceListProps<Item>) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -145,7 +150,7 @@ export function VirtualizedLearningSentenceList<
   }, [virtualized]);
 
   useLayoutEffect(() => {
-    if (!virtualized || activeIndex < 0) return;
+    if (!virtualized || !followActive || activeIndex < 0) return;
     const viewportElement = viewportRef.current;
     const top = layout.offsets[activeIndex];
     const height = layout.heights[activeIndex];
@@ -159,11 +164,25 @@ export function VirtualizedLearningSentenceList<
     ) {
       viewportElement.scrollTop = bottom - viewportElement.clientHeight;
     }
-  }, [activeIndex, layout, virtualized]);
+  }, [activeIndex, followActive, layout, virtualized]);
+
+  const manualScrollProps = {
+    onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
+      if (
+        ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]
+          .includes(event.key)
+      ) {
+        onManualScroll();
+      }
+    },
+    onPointerDownCapture: onManualScroll,
+    onTouchStartCapture: onManualScroll,
+    onWheelCapture: onManualScroll,
+  };
 
   if (!virtualized) {
     return (
-      <ol className={className}>
+      <ol className={className} {...manualScrollProps}>
         {items.map((item, index) => (
           <li className="learning-sentence-item" key={item.id}>
             {renderItem(item, index)}
@@ -189,7 +208,11 @@ export function VirtualizedLearningSentenceList<
   const visibleItems = items.slice(visibleStart, visibleEnd);
 
   return (
-    <div className="virtualized-sentence-viewport" ref={viewportRef}>
+    <div
+      className="virtualized-sentence-viewport"
+      ref={viewportRef}
+      {...manualScrollProps}
+    >
       <ol
         className={`${className} virtualized-sentence-list`}
         style={{ height: layout.totalHeight }}
