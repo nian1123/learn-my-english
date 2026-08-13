@@ -2,6 +2,12 @@
 
 一个本地优先的美式英语听力学习应用。粘贴 YouTube URL 后，应用会尝试获取已有英文 Caption Source，也可以在自动获取失败后使用学习者提供的 VTT/SRT，并通过官方 YouTube 嵌入播放器按 Learning Sentence 定位练习。
 
+## 初步 Demo
+
+![Learn My English 学习页：YouTube 播放器、逐句字幕和当前句高亮](./docs/images/learn-my-english-demo.jpg)
+
+YouTube 播放、逐句定位、当前句高亮、单句循环、倍速和本地句子编辑集中在同一个学习工作区。
+
 ## 从空环境启动
 
 需要 [Node.js 20.9 或更高版本](https://nextjs.org/docs/app/getting-started/installation)、npm 和 Google Chrome。先确认版本，再在仓库根目录安装锁定版本的依赖：
